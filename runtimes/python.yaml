@@ -1,0 +1,14 @@
+id: python
+display_name: Python
+image: python:3.11-alpine
+builder_image: python:3.11-alpine
+# Managed virtual environment; always built so the default command works.
+build_argv:
+  - sh
+  - -c
+  - python -m venv .venv && if [ -f requirements.txt ]; then .venv/bin/pip install --no-cache-dir -r requirements.txt; fi
+default_argv: [/workspace/.venv/bin/python, main.py]
+allowed_commands: [python, python3, /workspace/.venv/bin/python]
+env: {PYTHONUNBUFFERED: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1"}
+defaults: {memory_bytes: 268435456, nano_cpus: 500000000, pids_limit: 128}
+min_memory_bytes: 67108864

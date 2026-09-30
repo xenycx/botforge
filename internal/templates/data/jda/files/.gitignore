@@ -1,0 +1,4 @@
+target/
+app.jar
+.maven/
+.m2/

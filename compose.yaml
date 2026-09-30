@@ -1,0 +1,16 @@
+services:
+  botforge:
+    image: ghcr.io/xenycx/botforge:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+      # Uncomment when using the embedded SFTP server.
+      # - "2022:2022"
+    env_file: .env
+    volumes:
+      - botforge-data:/var/lib/botpanel
+      # The in-process runner needs Docker. Treat this container as root-equivalent.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  botforge-data:

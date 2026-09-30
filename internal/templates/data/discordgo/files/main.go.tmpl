@@ -1,0 +1,52 @@
+// DiscordGo starter. Set DISCORD_TOKEN in the panel's Environment tab.
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/bwmarrin/discordgo"
+)
+
+func main() {
+	token := os.Getenv("DISCORD_TOKEN")
+	if token == "" {
+		log.Fatal("DISCORD_TOKEN is not set. Add it in the panel under Environment.")
+	}
+	dg, err := discordgo.New("Bot " + token)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dg.Identify.Intents = discordgo.IntentsGuilds
+
+	dg.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+		log.Printf("Logged in as %s", r.User.Username)
+		_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", []*discordgo.ApplicationCommand{
+			{Name: "ping", Description: "Replies with the gateway latency"},
+		})
+		if err != nil {
+			log.Printf("registering commands: %v", err)
+		}
+	})
+	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Type != discordgo.InteractionApplicationCommand || i.ApplicationCommandData().Name != "ping" {
+			return
+		}
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Pong! %d ms", s.HeartbeatLatency().Milliseconds())},
+		})
+	})
+
+	if err := dg.Open(); err != nil {
+		log.Fatal(err)
+	}
+	defer dg.Close()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+}

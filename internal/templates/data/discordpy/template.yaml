@@ -1,0 +1,21 @@
+id: discordpy
+name: discord.py starter
+description: Slash-command bot with discord.py 2 and BotForge analytics.
+runtime: python
+language: Python
+sdk: py
+version: 1
+tested_with: "discord.py 2 on Python 3.11"
+first_start: "First start creates a virtual environment and installs requirements.txt."
+privileged_intents: []
+env:
+  - name: DISCORD_TOKEN
+    label: Bot token
+    description: "Discord Developer Portal, your application, Bot, Reset Token. Paste it here; it is stored encrypted and never shown in lists."
+    secret: true
+    required: true
+setup:
+  - "Create an application at discord.com/developers/applications and open its Bot page."
+  - "Reset the token and paste it into DISCORD_TOKEN."
+  - "Invite the bot: OAuth2, URL Generator, scopes bot and applications.commands, then open the link."
+  - "Start the bot and run /ping in your server."

@@ -1,0 +1,17 @@
+id: rust
+display_name: Rust
+image: alpine:3.23           # minimal execution image for the compiled musl binary
+builder_image: rust:1.96-alpine
+build_if_files: [Cargo.toml]
+build_argv:
+  - sh
+  - -c
+  - cargo build --release && bin=$(find target/release -maxdepth 1 -type f -perm -u+x ! -name '*.so' ! -name '*.d' | head -n1) && cp "$bin" app
+default_argv: [./app]
+allow_workspace_binary: true
+env: {CARGO_HOME: /workspace/.cargo}
+defaults: {memory_bytes: 134217728, nano_cpus: 500000000, pids_limit: 128}
+min_memory_bytes: 33554432
+# Compiling serenity/poise needs about 3 GiB of real memory (rustc is SIGKILLed at
+# 1.5 GiB when the container has no swap). Only the build container gets this.
+build_memory_bytes: 3221225472

@@ -1,0 +1,11 @@
+id: go
+display_name: Go
+image: alpine:3.23
+builder_image: golang:1.27-alpine
+build_if_files: [go.mod]
+build_argv: [sh, -c, "CGO_ENABLED=0 go build -buildvcs=false -o app ."]
+default_argv: [./app]
+allow_workspace_binary: true
+env: {GOCACHE: /workspace/.cache/go-build, GOPATH: /workspace/.gopath}
+defaults: {memory_bytes: 134217728, nano_cpus: 500000000, pids_limit: 128}
+min_memory_bytes: 33554432

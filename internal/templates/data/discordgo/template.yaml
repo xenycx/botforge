@@ -1,0 +1,21 @@
+id: discordgo
+name: DiscordGo starter
+description: Slash-command bot with DiscordGo.
+runtime: go
+language: Go
+sdk: ""
+version: 1
+tested_with: "DiscordGo 0.29.0 on Go 1.27"
+first_start: "First start compiles the bot in a build container."
+privileged_intents: []
+env:
+  - name: DISCORD_TOKEN
+    label: Bot token
+    description: "Discord Developer Portal, your application, Bot, Reset Token. Paste it here; it is stored encrypted and never shown in lists."
+    secret: true
+    required: true
+setup:
+  - "Create an application at discord.com/developers/applications and open its Bot page."
+  - "Reset the token and paste it into DISCORD_TOKEN."
+  - "Invite the bot: OAuth2, URL Generator, scopes bot and applications.commands, then open the link."
+  - "Start the bot and run /ping in your server."

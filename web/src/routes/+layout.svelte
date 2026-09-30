@@ -1,0 +1,243 @@
+<script lang="ts">
+	import '../app.css';
+	import { onMount } from 'svelte';
+	import { afterNavigate, beforeNavigate, goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { api } from '$lib/api/client';
+	import type { Bot } from '$lib/api/types';
+	import { session, loadSession, logout, rememberNext } from '$lib/session.svelte';
+	import { confirmLeave, dirtyEntries } from '$lib/ui/guard.svelte';
+	import DialogHost from '$lib/components/ui/DialogHost.svelte';
+	import ToastRegion from '$lib/components/ui/ToastRegion.svelte';
+	import Icon, { type IconName } from '$lib/components/ui/Icon.svelte';
+	import Menu from '$lib/components/ui/Menu.svelte';
+	import OperationShelf from '$lib/components/OperationShelf.svelte';
+	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import { theme, cycleTheme, setTheme } from '$lib/ui/theme.svelte';
+	import { describe } from '$lib/status';
+
+	let { children } = $props();
+	let drawer = $state(false);
+	let palette = $state(false);
+	let setupNeeded = $state(false);
+	function readSidebarPreference() {
+		try {
+			return localStorage.getItem('botforge.sidebarCollapsed') === '1';
+		} catch {
+			return false;
+		}
+	}
+	let sidebarCollapsed = $state(readSidebarPreference());
+
+	// Pages that work without an account.
+	const PUBLIC = ['/', '/login', '/register', '/welcome', '/setup'];
+
+	onMount(async () => {
+		await loadSession();
+		if (!session.user) {
+			try {
+				setupNeeded = (await api<{ needed: boolean }>('GET', '/setup/status')).needed;
+			} catch {
+				/* older server or offline: fall through to sign-in */
+			}
+		}
+	});
+
+	$effect(() => {
+		if (!session.loaded || session.user) return;
+		const p = page.url.pathname;
+		if (setupNeeded && p !== '/setup') goto('/setup');
+		else if (!setupNeeded && !PUBLIC.includes(p)) {
+			rememberNext(location.pathname + location.search + location.hash);
+			goto('/login');
+		}
+	});
+
+	function toggleSidebar() {
+		sidebarCollapsed = !sidebarCollapsed;
+		try {
+			localStorage.setItem('botforge.sidebarCollapsed', sidebarCollapsed ? '1' : '0');
+		} catch {
+			/* the preference is optional */
+		}
+	}
+
+	// Leaving with unsaved edits asks first (in-app navigation and page exit).
+	let bypass = false;
+	beforeNavigate((nav) => {
+		drawer = false;
+		if (bypass || nav.type === 'leave' || !nav.to || !dirtyEntries().length) return;
+		nav.cancel();
+		const to = nav.to.url;
+		confirmLeave().then((ok) => {
+			if (!ok) return;
+			bypass = true;
+			goto(to).finally(() => (bypass = false));
+		});
+	});
+	function beforeUnload(e: BeforeUnloadEvent) {
+		if (dirtyEntries().length) e.preventDefault();
+	}
+
+	// Favorites for the sidebar, refreshed on navigation (cheap: one list call).
+	let favorites = $state<Bot[]>([]);
+	let lastFetch = 0;
+	async function loadFavorites() {
+		if (!session.user || Date.now() - lastFetch < 5000) return;
+		lastFetch = Date.now();
+		try {
+			favorites = (await api<{ bots: Bot[] }>('GET', '/bots')).bots.filter((b) => b.favorite).slice(0, 8);
+		} catch {
+			/* the sidebar is a convenience */
+		}
+	}
+	afterNavigate(() => loadFavorites());
+	$effect(() => {
+		if (session.user) loadFavorites();
+	});
+
+	const path = $derived(page.url.pathname);
+	const isAdmin = $derived(session.user?.role === 'admin');
+	type NavItem = { href: string; label: string; icon: IconName; active: boolean };
+	const nav = $derived<NavItem[]>([
+		{ href: '/dashboard', label: 'Overview', icon: 'home', active: path === '/dashboard' || (path.startsWith('/bots') && path !== '/bots/new') },
+		{ href: '/templates', label: 'Templates', icon: 'layers', active: path.startsWith('/templates') || path === '/bots/new' },
+		{ href: '/activity', label: 'Activity', icon: 'activity', active: path.startsWith('/activity') },
+		{ href: '/settings/connected-accounts', label: 'Settings', icon: 'gear', active: path.startsWith('/settings') },
+		...(isAdmin ? [{ href: '/admin/users', label: 'Administration', icon: 'shield' as IconName, active: path.startsWith('/admin') }] : [])
+	]);
+	const resources = $derived([
+		{ href: 'https://github.com/xenycx/botforge/tree/main/docs', label: 'Documentation', icon: 'book' as IconName, external: true },
+		{ href: '/api/v1/automation/openapi.yaml', label: 'Automation API', icon: 'code' as IconName, external: true },
+		{ href: '/', label: 'What BotForge does', icon: 'info' as IconName, external: false },
+		...(isAdmin ? [{ href: '/admin/diagnostics', label: 'Status', icon: 'chart' as IconName, external: false }] : [])
+	]);
+	const bare = $derived(PUBLIC.includes(path) || (!session.user && session.loaded));
+	const who = $derived(session.user?.display_name || session.user?.email.split('@')[0] || '');
+	const initials = $derived(who.slice(0, 2).toUpperCase());
+	const themeLabel = $derived(theme.pref === 'system' ? `System theme (${theme.dark ? 'dark' : 'light'})` : theme.pref === 'dark' ? 'Dark theme' : 'Light theme');
+	const accountItems = $derived([
+		{ label: session.user?.email ?? '', disabled: true, onselect: () => {} },
+		'separator' as const,
+		{ label: 'Profile', onselect: () => goto('/settings/profile') },
+		{ label: 'Appearance', onselect: () => goto('/settings/appearance') },
+		{ label: 'Connected accounts', onselect: () => goto('/settings/connected-accounts') },
+		{ label: 'Security', onselect: () => goto('/settings/security') },
+		{ label: 'SFTP and API keys', onselect: () => goto('/settings/sftp') },
+		'separator' as const,
+		{ label: `${theme.pref === 'light' ? '✓ ' : ''}Light theme`, onselect: () => setTheme('light') },
+		{ label: `${theme.pref === 'dark' ? '✓ ' : ''}Dark theme`, onselect: () => setTheme('dark') },
+		{ label: `${theme.pref === 'system' ? '✓ ' : ''}Match the system`, onselect: () => setTheme('system') },
+		'separator' as const,
+		{ label: 'Sign out', onselect: logout }
+	]);
+</script>
+
+<svelte:window onbeforeunload={beforeUnload} />
+<svelte:head><title>BotForge</title></svelte:head>
+
+{#snippet sidebar(compact = false, collapsible = false)}
+	<div class="flex items-center {compact ? 'flex-col justify-center gap-2' : 'gap-2'} px-1">
+		<a href="/dashboard" class="flex min-w-0 items-center gap-2.5 {compact ? 'justify-center' : 'px-2'} py-1" aria-label="BotForge dashboard" title={compact ? 'BotForge dashboard' : undefined}>
+			<img src="/favicon.svg" alt="" width="30" height="30" class="shrink-0 rounded-[8px]" />
+			{#if !compact}<span class="truncate font-semibold tracking-[0.08em] uppercase">BotForge</span>{/if}
+		</a>
+		{#if collapsible}
+			<button class="tb-btn {compact ? '' : 'ml-auto'} shrink-0" onclick={toggleSidebar} aria-label={compact ? 'Expand sidebar' : 'Collapse sidebar'} title={compact ? 'Expand sidebar' : 'Collapse sidebar'}>
+				<Icon name={compact ? 'chevronRight' : 'chevronLeft'} size={16} />
+			</button>
+		{/if}
+	</div>
+	<nav class="mt-6" aria-label="Main">
+		<ul class="grid gap-0.5">
+			{#each nav as n (n.href)}
+				<li>
+					<a href={n.href} class="side-link {compact ? 'justify-center px-0' : ''}" data-active={n.active} aria-current={n.active ? 'page' : undefined} aria-label={compact ? n.label : undefined} title={compact ? n.label : undefined}>
+						<Icon name={n.icon} class="side-icon" />{#if !compact}<span>{n.label}</span>{/if}
+					</a>
+				</li>
+			{/each}
+		</ul>
+	</nav>
+	<div class="my-5 border-t border-rule-soft"></div>
+	<div>
+		{#if !compact}<p class="eyebrow flex items-center justify-between px-3">Favorites <a href="/dashboard" class="text-muted hover:text-ink" aria-label="Star bots on the overview"><Icon name="plus" size={14} /></a></p>{/if}
+		<ul class="mt-2 grid gap-0.5">
+			{#each favorites as b (b.id)}
+				{@const d = describe(b)}
+				<li>
+					<a href="/bots/{b.id}" class="side-link {compact ? 'justify-center px-0' : ''}" data-active={path === `/bots/${b.id}`} aria-label={compact ? b.name : undefined} title={compact ? b.name : undefined}>
+						<span class="side-dot" data-tone={d.tone}></span>{#if !compact}<span class="truncate">{b.name}</span>{/if}
+					</a>
+				</li>
+			{:else}
+				{#if !compact}<li class="px-3 text-small text-muted">Star a bot to pin it here.</li>{/if}
+			{/each}
+		</ul>
+	</div>
+	<div class="my-5 border-t border-rule-soft"></div>
+	<div>
+		{#if !compact}<p class="eyebrow px-3">Resources</p>{/if}
+		<ul class="mt-2 grid gap-0.5">
+			{#each resources as r (r.href)}
+				<li>
+					<a href={r.href} class="side-link group {compact ? 'justify-center px-0' : ''}" target={r.external ? '_blank' : undefined} rel={r.external ? 'noopener' : undefined} aria-label={compact ? r.label : undefined} title={compact ? r.label : undefined}>
+						<Icon name={r.icon} class="side-icon" />{#if !compact}<span class="flex-1">{r.label}</span>{/if}
+						{#if r.external && !compact}<Icon name="external" size={13} class="text-muted opacity-60 group-hover:opacity-100" />{/if}
+					</a>
+				</li>
+			{/each}
+		</ul>
+	</div>
+{/snippet}
+
+{#if session.user && !bare}
+	<a href="#main" class="sr-only z-50 bg-raised px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:rounded-control focus:shadow-overlay">Skip to content</a>
+	<div class="lg:grid {sidebarCollapsed ? 'lg:grid-cols-[72px_minmax(0,1fr)]' : 'lg:grid-cols-[16.5rem_minmax(0,1fr)]'} lg:transition-[grid-template-columns] lg:duration-200">
+		<aside class="sidebar sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-rule-soft px-3 py-5 lg:flex" aria-label="Sidebar">
+			{@render sidebar(sidebarCollapsed, true)}
+		</aside>
+		<div class="min-w-0">
+			<header class="topbar sticky top-0 z-30 border-b border-rule-soft backdrop-blur-md">
+				<div class="flex h-16 items-center gap-2 px-4 sm:px-6 lg:px-10">
+					<button class="btn btn-quiet btn-icon lg:hidden" aria-label="Open menu" aria-expanded={drawer} onclick={() => (drawer = true)}><Icon name="menu" size={18} /></button>
+					<a href="/dashboard" class="flex items-center gap-2 lg:hidden" aria-label="BotForge dashboard"><img src="/favicon.svg" alt="" width="26" height="26" class="rounded-[7px]" /></a>
+					<p class="hidden truncate text-title text-muted sm:block">Welcome back, <span class="font-semibold text-ink">{who}</span></p>
+					<div class="ml-auto flex items-center gap-1.5">
+						<button class="tb-btn" onclick={() => (palette = true)} aria-label="Go to a bot or page (Ctrl+K)" title="Go to (Ctrl+K)"><Icon name="search" size={17} /></button>
+						<a class="tb-btn hidden sm:grid" href="/activity" aria-label="Activity" title="Activity"><Icon name="history" size={17} /></a>
+						<button class="tb-btn" onclick={cycleTheme} aria-label="{themeLabel}. Switch theme" title="{themeLabel} · click to switch">
+							<Icon name={theme.pref === 'system' ? 'monitor' : theme.dark ? 'moon' : 'sun'} size={17} />
+						</button>
+						<a href="/bots/new" class="btn btn-primary ml-1"><Icon name="plus" />New</a>
+						<Menu label="Account" items={accountItems}>
+							{#snippet trigger()}{#if session.user?.avatar_url}<img class="avatar object-cover" src={session.user.avatar_url} alt="" />{:else}<span class="avatar" aria-hidden="true">{initials}</span>{/if}<Icon name="chevronDown" size={14} class="text-muted" />{/snippet}
+						</Menu>
+					</div>
+				</div>
+			</header>
+			<main id="main" tabindex="-1" class="mx-auto max-w-[1400px] px-4 pt-6 pb-24 outline-none sm:px-6 lg:px-10 lg:pt-8">{@render children()}</main>
+		</div>
+	</div>
+
+	{#if drawer}
+		<div class="fixed inset-0 z-40 bg-black/50 lg:hidden" role="presentation" onclick={() => (drawer = false)}></div>
+		<aside class="sidebar pb-safe fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] animate-enter flex-col overflow-y-auto border-r border-rule-soft px-3 py-5 shadow-overlay lg:hidden" aria-label="Menu">
+			<button class="btn btn-quiet btn-icon absolute top-4 right-3" aria-label="Close menu" onclick={() => (drawer = false)}><Icon name="x" size={18} /></button>
+			{@render sidebar()}
+			<div class="mt-auto pt-6">
+				<button class="side-link w-full" onclick={logout}><Icon name="logout" class="side-icon" />Sign out</button>
+			</div>
+		</aside>
+	{/if}
+
+	<OperationShelf />
+	<CommandPalette bind:open={palette} />
+{:else if session.loaded && PUBLIC.includes(path)}
+	{@render children()}
+{:else if !session.loaded}
+<div class="grid min-h-dvh place-items-center" role="status"><span class="text-muted">Loading BotForge…</span></div>
+{/if}
+
+<DialogHost />
+<ToastRegion />

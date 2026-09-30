@@ -1,0 +1,237 @@
+openapi: 3.1.0
+info:
+  title: BotForge automation API
+  version: "1"
+  description: |
+    A small HTTP API for scripts and CI: read bot status and history, start,
+    stop and restart bots, trigger GitHub deployments and create backups.
+
+    Authenticate with an automation token (Settings → SFTP and API keys →
+    Automation tokens) sent as `Authorization: Bearer bpa_...`. A token
+    carries a list of actions (`read`, `power`, `deploy`, `backup`), optionally
+    a list of bots, and an expiry. Every request is also checked against the
+    token owner's CURRENT permissions, so a token never grants more than its
+    owner holds. Revoking a token, its expiry or disabling its owner takes
+    effect on the next request.
+
+    Bots outside a token's bot list answer 404, like bots the owner cannot see.
+    Send `Idempotency-Key` on POST requests to make retries safe: a repeated
+    key within 24 hours replays the first response (header
+    `Idempotent-Replayed: true`) instead of starting the work again. Every
+    response carries `X-Request-ID` (your own value is echoed when it is 8-64
+    characters of `A-Za-z0-9._-`). The limit is 120 requests per minute per
+    token.
+
+    Lifecycle, deployment and backup requests answer 202: the work continues
+    in the background. Poll the bot (`phase`) or its operations.
+servers:
+  - url: /api/v1/automation
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: An automation token (bpa_...).
+  parameters:
+    BotID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 64 }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+    Bot:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        runtime: { type: string, examples: [nodejs] }
+        phase:
+          type: string
+          description: One word for the bot's state.
+          examples: [running, stopped, starting, building, retrying, failed, exited, stopping]
+        desired_state: { type: string, enum: [running, stopped, deleted] }
+        observed_state: { type: string }
+        generation: { type: integer }
+        observed_generation: { type: integer }
+        last_error: { type: [string, "null"] }
+    Operation:
+      type: object
+      properties:
+        id: { type: string }
+        bot_id: { type: string }
+        kind: { type: string, enum: [build, deploy, rollback, backup, restore] }
+        trigger: { type: string, examples: [manual, push, schedule, api, start] }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled, interrupted] }
+        stage: { type: string }
+        source_label: { type: [string, "null"] }
+        result_code: { type: [string, "null"] }
+        message: { type: [string, "null"] }
+        created_at_ms: { type: integer }
+        started_at_ms: { type: [integer, "null"] }
+        finished_at_ms: { type: [integer, "null"] }
+    Backup:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        status: { type: string, enum: [creating, ready, failed] }
+        size_bytes: { type: integer }
+        label: { type: [string, "null"] }
+        created_at_ms: { type: integer }
+  responses:
+    Unauthorized:
+      description: Missing, unknown, expired or revoked token.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: The token or its owner lacks the permission.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: No such bot, or not visible to this token.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: Another operation holds the bot, or the same Idempotency-Key is still running.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    TooMany:
+      description: Rate limit reached.
+paths:
+  /openapi.yaml:
+    get:
+      summary: This document
+      security: []
+      responses:
+        "200": { description: OpenAPI document }
+  /bots:
+    get:
+      summary: List the bots this token can see
+      description: Needs the `read` action.
+      responses:
+        "200":
+          description: Bots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bots: { type: array, items: { $ref: "#/components/schemas/Bot" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /bots/{id}:
+    parameters: [{ $ref: "#/components/parameters/BotID" }]
+    get:
+      summary: Bot status
+      description: Needs the `read` action.
+      responses:
+        "200": { description: Bot, content: { application/json: { schema: { $ref: "#/components/schemas/Bot" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /bots/{id}/operations:
+    parameters: [{ $ref: "#/components/parameters/BotID" }]
+    get:
+      summary: Build, deployment, backup and restore history
+      description: Needs the `read` action. Newest first; page with `before=<next_before>`.
+      parameters:
+        - { name: kind, in: query, schema: { type: string }, description: "Comma-separated kinds, e.g. deploy,rollback" }
+        - { name: before, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Operations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  operations: { type: array, items: { $ref: "#/components/schemas/Operation" } }
+                  next_before: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /bots/{id}/operations/{op}:
+    parameters:
+      - { $ref: "#/components/parameters/BotID" }
+      - { name: op, in: path, required: true, schema: { type: string } }
+    get:
+      summary: One operation
+      responses:
+        "200": { description: Operation, content: { application/json: { schema: { $ref: "#/components/schemas/Operation" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /bots/{id}/start:
+    parameters: [{ $ref: "#/components/parameters/BotID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      summary: Start the bot (or retry it after it gave up)
+      description: Needs the `power` action and the owner's start/stop permission.
+      responses:
+        "202": { description: Intent recorded, content: { application/json: { schema: { $ref: "#/components/schemas/Bot" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { description: The panel has no Docker runner. }
+  /bots/{id}/stop:
+    parameters: [{ $ref: "#/components/parameters/BotID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      summary: Stop the bot
+      responses:
+        "202": { description: Intent recorded, content: { application/json: { schema: { $ref: "#/components/schemas/Bot" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /bots/{id}/restart:
+    parameters: [{ $ref: "#/components/parameters/BotID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      summary: Restart the bot (starts it when stopped)
+      responses:
+        "202": { description: Intent recorded, content: { application/json: { schema: { $ref: "#/components/schemas/Bot" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /bots/{id}/deploy:
+    parameters: [{ $ref: "#/components/parameters/BotID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      summary: Deploy the linked GitHub branch, or one commit
+      description: |
+        Needs the `deploy` action and the owner's file permission. Only
+        available when GitHub sign-in is configured on the panel. A running bot
+        restarts on the new code when the deployment succeeds.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sha: { type: string, description: "Full 40-character commit id (redeploy/roll back)" }
+      responses:
+        "202": { description: Queued }
+        "400": { description: Invalid commit id }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /bots/{id}/backups:
+    parameters: [{ $ref: "#/components/parameters/BotID" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+    post:
+      summary: Create a backup
+      description: Needs the `backup` action and the owner's file permission. Environment variables are included, sealed.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, maxLength: 80 }
+      responses:
+        "202": { description: Backup started, content: { application/json: { schema: { $ref: "#/components/schemas/Backup" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }

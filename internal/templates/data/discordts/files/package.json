@@ -1,0 +1,19 @@
+{
+  "name": "discord-bot-ts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.mts",
+    "check": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

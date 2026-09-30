@@ -1,0 +1,29 @@
+id: java
+display_name: Java
+image: eclipse-temurin:25-jre-alpine
+builder_image: eclipse-temurin:25-jdk-alpine
+# Projects with a pom.xml are built with Maven (downloaded into the workspace and
+# verified against a pinned SHA-512, produces app.jar). Projects without one ship
+# a built app.jar and skip the build stage.
+build_if_files: [pom.xml]
+build_argv:
+  - sh
+  - -c
+  - |
+    set -e
+    V=3.9.9
+    SUM=a555254d6b53d267965a3404ecb14e53c3827c09c3b94b5678835887ab404556bfaf78dcfe03ba76fa2508649dca8531c74bca4d5846513522404d48e8c4ac8b
+    if [ ! -x .maven/bin/mvn ]; then
+      mkdir -p .maven
+      wget -q -O /tmp/maven.tgz "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$V/apache-maven-$V-bin.tar.gz"
+      echo "$SUM  /tmp/maven.tgz" | sha512sum -c -
+      tar xzf /tmp/maven.tgz --strip-components=1 -C .maven
+    fi
+    .maven/bin/mvn -q -B -DskipTests -Dmaven.repo.local=/workspace/.m2 package
+    cp target/app.jar app.jar
+default_argv: [java, -XX:MaxRAMPercentage=60, -jar, app.jar]
+allowed_commands: [java]
+# Leave room for metaspace/thread stacks/native memory beyond the heap.
+defaults: {memory_bytes: 536870912, nano_cpus: 1000000000, pids_limit: 256}
+min_memory_bytes: 268435456
+build_memory_bytes: 1073741824  # Maven plus the JDA dependency tree

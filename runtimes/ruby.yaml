@@ -1,0 +1,11 @@
+id: ruby
+display_name: Ruby
+image: ruby:4-alpine
+builder_image: ruby:4-alpine
+build_if_files: [Gemfile]
+build_argv: [sh, -c, "bundle config set --local path vendor/bundle && bundle install"]
+default_argv: [ruby, main.rb]
+allowed_commands: [ruby, bundle]
+env: {BUNDLE_APP_CONFIG: /workspace/.bundle, BUNDLE_PATH: /workspace/vendor/bundle}
+defaults: {memory_bytes: 268435456, nano_cpus: 500000000, pids_limit: 128}
+min_memory_bytes: 67108864
