@@ -53,7 +53,7 @@
 	<header class="sticky top-0 z-30 border-b border-rule-soft backdrop-blur-md" style="background: color-mix(in srgb, var(--color-paper) 80%, transparent)">
 		<nav class="mx-auto flex h-16 max-w-6xl items-center gap-6 px-5" aria-label="Main">
 			<a href="/" class="flex items-center gap-2.5" aria-label="BotForge">
-				<img src="/favicon.svg" alt="" width="30" height="30" class="rounded-[8px]" />
+				<img src="/favicon.svg" alt="" width="30" height="30" class="rounded-tile" />
 				<span class="font-semibold tracking-[0.08em] uppercase">BotForge</span>
 			</a>
 			<div class="hidden items-center gap-5 text-muted md:flex">
@@ -102,7 +102,7 @@
 						</div>
 						<ul class="mt-4 grid gap-2">
 							{#each fleet as b (b.name)}
-								<li class="spine flex items-center gap-3 rounded-[10px] border border-rule-soft bg-paper py-3 pr-4 pl-5" data-tone={b.tone} data-busy={b.tone === 'warn'}>
+								<li class="spine flex items-center gap-3 rounded-tile border border-rule-soft bg-paper py-3 pr-4 pl-5" data-tone={b.tone} data-busy={b.tone === 'warn'}>
 									<div class="min-w-0 flex-1">
 										<p class="font-semibold">{b.name}</p>
 										<p class="text-small text-muted">{b.meta}</p>
@@ -131,7 +131,7 @@
 			<div class="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-8 gap-y-4 px-5 py-7">
 				<span class="eyebrow">Starter templates</span>
 				{#each langs as l (l.name)}
-					<span class="flex items-center gap-2 text-small"><span class="size-2 rounded-full" style="background:{l.color}"></span><span class="font-medium">{l.name}</span><span class="text-muted">{l.lang}</span></span>
+					<span class="flex items-center gap-2 text-small"><span class="size-2 rounded-pill" style="background:{l.color}"></span><span class="font-medium">{l.name}</span><span class="text-muted">{l.lang}</span></span>
 				{/each}
 			</div>
 		</section>
@@ -143,7 +143,7 @@
 			<ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				{#each features as f (f.title)}
 					<li class="card feature p-5">
-						<span class="grid size-10 place-items-center rounded-[10px]" style="background: color-mix(in srgb, var(--color-action) 13%, transparent)"><Icon name={f.icon} class="text-action" size={18} /></span>
+						<span class="grid size-10 place-items-center rounded-tile" style="background: color-mix(in srgb, var(--color-action) 13%, transparent)"><Icon name={f.icon} class="text-action" size={18} /></span>
 						<h3 class="mt-4 text-title font-semibold">{f.title}</h3>
 						<p class="mt-1.5 text-small leading-relaxed text-muted">{f.text}</p>
 					</li>
@@ -205,7 +205,7 @@
 
 	<footer class="border-t border-rule-soft">
 		<div class="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-5 py-8 text-small text-muted">
-			<img src="/favicon.svg" alt="" width="20" height="20" class="rounded-[5px]" />
+			<img src="/favicon.svg" alt="" width="20" height="20" class="rounded-control" />
 			<span>BotForge · self-hosted Discord bot hosting</span>
 			<span class="flex-1"></span>
 			<a href={repo} class="hover:text-ink" target="_blank" rel="noopener">Source</a>

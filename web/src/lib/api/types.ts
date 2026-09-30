@@ -3,6 +3,7 @@ export type User = { id: string; email: string; display_name: string; avatar_url
 export type Bot = {
 	id: string;
 	owner_id: string;
+	workspace_id: string;
 	node_id: string;
 	name: string;
 	runtime: string;
@@ -19,6 +20,9 @@ export type Bot = {
 	last_error: string | null;
 	created_at_ms: number;
 	updated_at_ms: number;
+	discord_user_id: string;
+	discord_username: string;
+	discord_avatar_url: string;
 	permissions: number;
 	shared: boolean;
 	entrypoint: string[];
@@ -191,7 +195,8 @@ export type Dep = { name: string; spec: string; group: string; editable: boolean
 export type Packages = { supported: boolean; ecosystem?: string; file?: string; exists: boolean; groups?: string[]; deps: Dep[] };
 export type PkgResult = { name: string; version: string; description: string };
 export type Series = { name: string; latest: number; points: { t: number; v: number }[] };
-export type DashboardWidget = { key: string; kind: 'metric'|'status'|'progress'|'text'|'chart'|'table'|'link'; title: string; position: number; data: Record<string, unknown>; updated_at_ms: number };
+export type WidgetKind = 'metric'|'status'|'progress'|'text'|'chart'|'table'|'link'|'line'|'area'|'donut'|'gauge'|'heatmap'|'sparkline'|'kv'|'markdown'|'image'|'log'|'code';
+export type DashboardWidget = { key: string; kind: WidgetKind; title: string; group: string; span: 1|2|3; min_height: number; position: number; data: Record<string, unknown>; updated_at_ms: number; expires_at_ms: number|null; stale: boolean };
 export type Analytics = {
 	key_set: boolean;
 	window_ms: number;
@@ -217,7 +222,7 @@ export type Gauge = {
 };
 export type ApiKey = { id: string; name: string; prefix: string; created_at_ms: number; last_used_at_ms: number | null; expires_at_ms: number | null };
 
-export type OpKind = 'build' | 'deploy' | 'rollback' | 'backup' | 'restore';
+export type OpKind = 'build' | 'deploy' | 'rollback' | 'backup' | 'restore' | 'publish';
 export type OpStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 export type Operation = {
 	id: string;
@@ -268,3 +273,79 @@ export type Capacity = {
 	build_memory_bytes: number;
 	node?: { running: number; reserved_bytes: number; budget_bytes: number };
 };
+
+export type WorkspaceRole = 'owner' | 'admin' | 'developer' | 'viewer';
+export type Workspace = {
+	id: string;
+	name: string;
+	owner_id: string;
+	owner_email: string;
+	personal: boolean;
+	role: WorkspaceRole | '';
+	members: number;
+	bots: number;
+	running_bots: number;
+	memory_bytes: number;
+	sites: number;
+	last_active_at_ms: number;
+	created_at_ms: number;
+};
+export type WorkspaceMember = { user_id: string; email: string; display_name: string; role: WorkspaceRole; created_at_ms: number };
+export const roleRank: Record<WorkspaceRole | '', number> = { '': 0, viewer: 1, developer: 2, admin: 3, owner: 4 };
+export const roleText: Record<WorkspaceRole, string> = {
+	owner: 'Owner',
+	admin: 'Admin',
+	developer: 'Developer',
+	viewer: 'Viewer'
+};
+export const roleHelp: Record<WorkspaceRole, string> = {
+	owner: 'Everything, including deleting the workspace',
+	admin: 'Manage members and every bot and site',
+	developer: 'Create, deploy and operate bots and sites; no deleting or resource changes',
+	viewer: 'Read-only: status and console output'
+};
+
+export type Site = {
+	id: string;
+	workspace_id: string;
+	workspace_name: string;
+	owner_id: string;
+	owner_email: string;
+	name: string;
+	slug: string;
+	url: string;
+	spa: boolean;
+	clean_urls: boolean;
+	current_release: string | null;
+	release_bytes: number;
+	disabled: boolean;
+	domains: number;
+	repo_full_name: string | null;
+	repo_branch: string | null;
+	repo_root: string;
+	created_at_ms: number;
+	updated_at_ms: number;
+};
+export type SiteDomain = {
+	domain: string;
+	url: string;
+	verified: boolean;
+	verified_at_ms: number | null;
+	last_checked_at_ms: number | null;
+	last_error: string | null;
+	txt_name: string;
+	txt_value: string;
+	record_type: 'CNAME' | 'A' | 'AAAA';
+	record_target: string;
+};
+export type SiteRelease = {
+	id: string;
+	source: 'upload' | 'github';
+	source_label: string | null;
+	files: number;
+	bytes: number;
+	actor: string | null;
+	current: boolean;
+	created_at_ms: number;
+};
+export type SitesInfo = { enabled: boolean; domain?: string; example_url?: string; max_bytes?: number; max_domains?: number };

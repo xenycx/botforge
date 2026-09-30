@@ -24,6 +24,12 @@ followed; setuid/setgid dropped), writes the database last and atomically, then
 runs `verify`. Missing keys are reported by id, so you know exactly which key
 file to bring back.
 
+Hosted site files (`BOTPANEL_SITES_DIR`, see `sites.md`) are **not** part of
+this backup yet: the database restores the sites, their domains and release
+history, but a site whose release directory is missing shows an "unavailable"
+page until it is published again. Back that directory up with your host
+backups, or keep the built files so they can be republished.
+
 Bot files are archived while bots may be running; stop bots first for a
 point-in-time consistent copy. Container state and Docker logs are not backed
 up. Key rotation: add a new key, set `BOTPANEL_ACTIVE_KEY_ID`, and keep the old

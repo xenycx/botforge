@@ -9,6 +9,7 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import { creatable, loadWorkspaces, workspaces } from '$lib/workspaces.svelte';
 
 	type Source = 'template' | 'github' | 'blank';
 	const steps = ['Source', 'Details', 'Setup values', 'Review'];
@@ -36,6 +37,16 @@
 	let memoryMiB = $state<number | null>(null);
 	let cpus = $state<number | null>(null);
 	let startNow = $state(true);
+	// New bots go into the workspace selected in the sidebar (personal when "all").
+	let workspaceId = $state(workspaces.selected !== 'all' ? workspaces.selected : '');
+	$effect(() => {
+		loadWorkspaces();
+	});
+	// The personal workspace is the server default, so it is sent as "".
+	$effect(() => {
+		if (workspaceId && workspaces.list.find((w) => w.id === workspaceId)?.personal) workspaceId = '';
+	});
+	const targets = $derived(creatable());
 
 	let problems = $state<Record<string, string>>({});
 	let submitError = $state('');
@@ -167,6 +178,7 @@
 		if (Object.keys(vars).length) body.env = vars;
 		if (source === 'template') body.template_id = templateId;
 		if (source === 'github') body.github = repo;
+		if (workspaceId) body.workspace_id = workspaceId;
 		try {
 			const b = await api<Bot>('POST', '/bots', body);
 			if (startNow && canStart) {
@@ -312,8 +324,17 @@
 			<label class="mt-5 block max-w-md">
 				<span class="label">Name</span>
 				<input class="field" maxlength="64" bind:value={name} oninput={() => (nameTouched = true)} placeholder="Music bot" aria-invalid={problems.name ? 'true' : undefined} aria-describedby="name-help" />
-				<span id="name-help" class="help {problems.name ? 'text-fail!' : ''}">{problems.name || 'Only you and people you share the bot with see this name.'}</span>
+				<span id="name-help" class="help {problems.name ? 'text-fail!' : ''}">{problems.name || 'Only members of its workspace and people you share the bot with see this name.'}</span>
 			</label>
+			{#if targets.length > 1}
+				<label class="mt-4 block max-w-md">
+					<span class="label">Workspace</span>
+					<select class="field" bind:value={workspaceId}>
+						{#each targets as w (w.id)}<option value={w.personal ? '' : w.id}>{w.personal ? 'Personal' : w.name}</option>{/each}
+					</select>
+					<span class="help">Members of the workspace get access according to their role.</span>
+				</label>
+			{/if}
 		{:else if step === 2}
 			{#if tpl}
 				<div class="mt-4 surface p-4">
@@ -368,6 +389,7 @@
 		{:else}
 			<dl class="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2 border-y border-rule-soft py-3">
 				<dt class="text-muted">Name</dt><dd class="font-medium">{name}</dd>
+				{#if targets.length > 1}<dt class="text-muted">Workspace</dt><dd>{targets.find((w) => (w.personal ? '' : w.id) === workspaceId)?.name ?? 'Personal'}</dd>{/if}
 				<dt class="text-muted">Source</dt><dd>{sourceLabel}{#if source === 'github'}: <code>{repo.full_name}</code> on <code>{repo.branch}</code>{/if}</dd>
 				<dt class="text-muted">Language</dt><dd>{rt?.display_name ?? rtId}</dd>
 				<dt class="text-muted">Variables</dt>

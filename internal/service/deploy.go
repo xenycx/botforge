@@ -109,7 +109,8 @@ func (d *DeployService) token(ctx context.Context, userID string) (string, error
 
 func ghError(err error) error {
 	switch {
-	case errors.Is(err, github.ErrNotFound), errors.Is(err, github.ErrUnauthorized), errors.Is(err, github.ErrInvalid):
+	case errors.Is(err, github.ErrNotFound), errors.Is(err, github.ErrUnauthorized), errors.Is(err, github.ErrInvalid),
+		errors.Is(err, github.ErrConflict):
 		return domain.Invalid(err.Error())
 	}
 	return err
@@ -700,6 +701,7 @@ func validSignature(secret string, body []byte, header string) bool {
 func (d *DeployService) HandleWebhook(ctx context.Context, event, delivery, signature string, body []byte) (string, error) {
 	var p struct {
 		Ref        string `json:"ref"`
+		After      string `json:"after"`
 		Deleted    bool   `json:"deleted"`
 		Repository struct {
 			FullName string `json:"full_name"`
@@ -737,7 +739,9 @@ func (d *DeployService) HandleWebhook(ctx context.Context, event, delivery, sign
 	}
 	queued := false
 	for _, c := range verified {
-		if c.Branch == branch {
+		// A commit the panel pushed from this bot's own files is already
+		// deployed; redeploying it would only restart the bot.
+		if c.Branch == branch && (c.LastSHA == nil || *c.LastSHA != p.After) {
 			d.enqueue(c.BotID, DeployRequest{Trigger: "push"})
 			queued = true
 		}

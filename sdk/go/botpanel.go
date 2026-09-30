@@ -72,7 +72,7 @@ func New(stats func() map[string]float64, ready func() bool) *Panel {
 // SetWidget publishes or replaces a dashboard widget.
 func (p *Panel) SetWidget(key, kind, title string, data any, position int) {
 	p.mu.Lock()
-	if len(p.widgets) < 24 || p.widgets[key].Key != "" {
+	if len(p.widgets) < 48 || p.widgets[key].Key != "" {
 		p.widgets[key] = Widget{key, kind, title, position, data}
 	}
 	p.mu.Unlock()

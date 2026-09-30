@@ -73,7 +73,7 @@ public final class BotPanel {
 
     /** Publishes a dashboard widget; dataJson must be a JSON object. */
     public synchronized void widget(String key, String kind, String title, String dataJson, int position) {
-        if (widgets.size() < 24 || widgets.containsKey(key)) widgets.put(key, "{\"key\":"+quote(key)+",\"kind\":"+quote(kind)+",\"title\":"+quote(title)+",\"position\":"+position+",\"data\":"+dataJson+"}");
+        if (widgets.size() < 48 || widgets.containsKey(key)) widgets.put(key, "{\"key\":"+quote(key)+",\"kind\":"+quote(kind)+",\"title\":"+quote(title)+",\"position\":"+position+",\"data\":"+dataJson+"}");
     }
 
     /** Sends one push now. Failures are logged and dropped, never queued. */

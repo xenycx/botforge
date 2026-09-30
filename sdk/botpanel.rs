@@ -72,7 +72,7 @@ impl Panel {
     }
 
     pub fn widget(&self, key: &str, kind: &str, title: &str, data: serde_json::Value, position: u16) {
-        let mut w=self.inner.widgets.lock().unwrap(); if w.len()<24 || w.contains_key(key) { w.insert(key.to_string(),serde_json::json!({"key":key,"kind":kind,"title":title,"position":position,"data":data})); }
+        let mut w=self.inner.widgets.lock().unwrap(); if w.len()<48 || w.contains_key(key) { w.insert(key.to_string(),serde_json::json!({"key":key,"kind":kind,"title":title,"position":position,"data":data})); }
     }
 
     /// Pushes every 30 seconds on the Tokio runtime. `sample` returns the

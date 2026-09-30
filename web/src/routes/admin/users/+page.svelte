@@ -128,15 +128,17 @@
 	{#if users === null && !error}
 		<Skeleton rows={3} />
 	{:else}
-		<ul class="border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+		<ul class="card overflow-hidden [&>li+li]:border-t [&>li+li]:border-rule-soft">
 			{#each shown as u (u.id)}
-				<li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-3 {u.disabled ? 'opacity-70' : ''}">
+				<li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 {u.disabled ? 'opacity-70' : ''}">
+					{#if u.avatar_url}<img src={u.avatar_url} alt="" class="size-9 shrink-0 rounded-pill object-cover" />{:else}<span class="grid size-9 shrink-0 place-items-center rounded-pill bg-paper-2 text-small font-semibold text-muted" aria-hidden="true">{(u.display_name || u.email).slice(0, 2).toUpperCase()}</span>{/if}
 					<div class="min-w-0 flex-1 basis-60">
-						<p class="font-medium break-all">{u.email}{#if u.id === session.user?.id}<span class="ml-2 text-small font-normal text-muted">You</span>{/if}</p>
+						<p class="font-medium break-all"><a class="hover:underline" href="/admin/users/{u.id}">{u.display_name || u.email}</a>{#if u.id === session.user?.id}<span class="ml-2 text-small font-normal text-muted">You</span>{/if}</p>
 						<p class="text-small text-muted">
-							{u.role === 'admin' ? 'Administrator' : 'User'}{u.disabled ? ', disabled' : ''}. {u.bots} bot{u.bots === 1 ? '' : 's'}. {u.has_password ? 'Password' : 'Provider sign-in only'}. Joined {fmtWhen(u.created_at_ms)}.
+							{u.display_name ? `${u.email} · ` : ''}{u.role === 'admin' ? 'Administrator' : 'User'}{u.disabled ? ', disabled' : ''}. {u.bots} bot{u.bots === 1 ? '' : 's'}. {u.has_password ? 'Password' : 'Provider sign-in only'}. Joined {fmtWhen(u.created_at_ms)}.
 						</p>
 					</div>
+					<a class="btn btn-sm hidden sm:inline-flex" href="/admin/users/{u.id}">Workspaces and bots<Icon name="chevronRight" size={13} /></a>
 					<Menu label="Actions for {u.email}" items={menu(u)} />
 				</li>
 			{/each}

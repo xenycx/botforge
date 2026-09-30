@@ -59,6 +59,7 @@ func toUser(u domain.User) userDTO {
 type botDTO struct {
 	ID                 string   `json:"id"`
 	OwnerID            string   `json:"owner_id"`
+	WorkspaceID        string   `json:"workspace_id"`
 	NodeID             string   `json:"node_id"`
 	Name               string   `json:"name"`
 	Runtime            string   `json:"runtime"`
@@ -75,6 +76,9 @@ type botDTO struct {
 	LastError          *string  `json:"last_error"`
 	CreatedAtMS        int64    `json:"created_at_ms"`
 	UpdatedAtMS        int64    `json:"updated_at_ms"`
+	DiscordUserID      string   `json:"discord_user_id"`
+	DiscordUsername    string   `json:"discord_username"`
+	DiscordAvatarURL   string   `json:"discord_avatar_url"`
 	// Permissions is the caller's domain.Perm* mask on this bot; Shared is true
 	// when the caller is a sub-user rather than the owner or an administrator.
 	Permissions int  `json:"permissions"`
@@ -194,10 +198,11 @@ func toBot(b domain.Bot) botDTO {
 
 func toBotBase(b domain.Bot) botDTO {
 	return botDTO{
-		ID: b.ID, OwnerID: b.OwnerID, NodeID: b.NodeID, Name: b.Name, Runtime: b.Runtime, ImageRef: b.ImageRef, Argv: b.Argv,
+		ID: b.ID, OwnerID: b.OwnerID, WorkspaceID: b.WorkspaceID, NodeID: b.NodeID, Name: b.Name, Runtime: b.Runtime, ImageRef: b.ImageRef, Argv: b.Argv,
 		MemoryBytes: b.MemoryBytes, NanoCPUs: b.NanoCPUs, PidsLimit: b.PidsLimit, DesiredState: b.DesiredState,
 		ObservedState: b.ObservedState, Generation: b.Generation, ObservedGeneration: b.ObservedGeneration,
 		LastExitCode: b.LastExitCode, LastError: b.LastError, CreatedAtMS: b.CreatedAtMS, UpdatedAtMS: b.UpdatedAtMS,
+		DiscordUserID: b.DiscordUserID, DiscordUsername: b.DiscordUsername, DiscordAvatarURL: b.DiscordAvatarURL,
 		Permissions: domain.PermAll,
 		Phase:       phaseOf(b, nil, true), StateReason: b.StateReason, RestartCount: b.RestartCount, NextRetryAtMS: b.NextRetryAtMS,
 		LastStartedAtMS: b.LastStartedAtMS,

@@ -7,6 +7,7 @@
 	import { registerDirty } from '$lib/ui/guard.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import { creatable, loadWorkspaces, workspaceName } from '$lib/workspaces.svelte';
 
 	let { bot, stopped, onSaved }: { bot: Bot; stopped: boolean; onSaved: (b: Bot) => void } = $props();
 
@@ -21,6 +22,23 @@
 	// svelte-ignore state_referenced_locally
 	let tagText = $state(bot.tags.join(', '));
 	let tagError = $state('');
+	// svelte-ignore state_referenced_locally
+	let workspaceId = $state(bot.workspace_id);
+	$effect(() => {
+		loadWorkspaces();
+	});
+
+	async function moveWorkspace(e: SubmitEvent) {
+		e.preventDefault();
+		try {
+			const b = await api<Bot>('PUT', `/bots/${bot.id}/workspace`, { workspace_id: workspaceId });
+			onSaved({ ...bot, workspace_id: b.workspace_id });
+			await loadWorkspaces();
+			toast(`Moved to ${workspaceName(b.workspace_id) || 'the workspace'}`, 'success');
+		} catch (err) {
+			toast(err instanceof ApiError ? err.message : 'The bot could not be moved.', 'fail');
+		}
+	}
 
 	async function saveTags(e: SubmitEvent) {
 		e.preventDefault();
@@ -134,6 +152,19 @@
 		<button class="btn">Save tags</button>
 	</form>
 </section>
+
+{#if (bot.permissions & 16) !== 0 && creatable().length > 1}
+	<section class="mt-10 max-w-2xl" aria-labelledby="ws-h">
+		<h3 id="ws-h" class="text-title font-semibold">Workspace</h3>
+		<p class="mt-1 text-muted">Everyone in the workspace can see this bot and act on it according to their role. Moving it changes who has access; per-bot sharing stays.</p>
+		<form class="mt-3 flex flex-wrap items-end gap-2" onsubmit={moveWorkspace}>
+			<label class="block min-w-0 flex-1 basis-64"><span class="sr-only">Workspace</span>
+				<select class="field" bind:value={workspaceId}>{#each creatable() as w (w.id)}<option value={w.id}>{w.personal ? 'Personal' : w.name}</option>{/each}</select>
+			</label>
+			<button class="btn" disabled={workspaceId === bot.workspace_id}>Move bot</button>
+		</form>
+	</section>
+{/if}
 
 {#if !bot.shared}
 	<section class="mt-12 max-w-2xl border-t border-rule-soft pt-5" aria-labelledby="danger-h">

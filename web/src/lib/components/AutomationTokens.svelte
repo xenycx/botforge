@@ -8,6 +8,7 @@
 	import Dialog from '$lib/components/ui/Dialog.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 
 	type Token = { id: string; name: string; prefix: string; actions: string[]; bot_ids: string[] | null; created_at_ms: number; last_used_at_ms: number | null; expires_at_ms: number };
 	let tokens = $state<Token[] | null>(null);
@@ -87,17 +88,16 @@
 	const origin = typeof location === 'undefined' ? '' : location.origin;
 </script>
 
-<div class="flex flex-wrap items-end justify-between gap-2">
-	<div>
-		<h2 class="text-section">Automation tokens</h2>
-		<p class="mt-1 max-w-prose text-muted">For scripts and CI: check status, start and stop bots, deploy and back up over HTTP. A token can do only what you choose here and what your account can do at the time.</p>
-	</div>
-	<button class="btn btn-primary" onclick={start}><Icon name="plus" />New token</button>
+<SettingsSection title="Automation tokens" description="For scripts and CI: check status, start and stop bots, deploy and back up over HTTP. A token can do only what you choose and what your account can do at the time.">
+{#if error}<Notice tone="fail" class="mb-3">{error}</Notice>{/if}
+<div class="card overflow-hidden">
+<div class="flex items-center justify-between gap-2 border-b border-rule-soft px-4 py-2.5">
+	<p class="text-small text-muted">{tokens ? `${tokens.length} token${tokens.length === 1 ? '' : 's'}` : 'Loading…'}</p>
+	<button class="btn btn-sm btn-primary" onclick={start}><Icon name="plus" size={14} />New token</button>
 </div>
-{#if error}<Notice tone="fail" class="mt-3">{error}</Notice>{/if}
-<ul class="mt-3 max-w-3xl divide-y divide-rule-soft border-y border-rule-soft">
+<ul class="divide-y divide-rule-soft">
 	{#each tokens ?? [] as t (t.id)}
-		<li class="flex flex-wrap items-center gap-3 py-2.5">
+		<li class="flex flex-wrap items-center gap-3 px-4 py-3">
 			<div class="min-w-0 flex-1">
 				<p class="font-medium">{t.name} <code class="ml-1 font-mono text-[12px] text-muted">{t.prefix}…</code></p>
 				<p class="mt-0.5 flex flex-wrap gap-1">
@@ -109,10 +109,12 @@
 			<button class="btn btn-sm btn-danger" onclick={() => revoke(t)}>Revoke</button>
 		</li>
 	{:else}
-		<li class="py-3 text-muted">{tokens ? 'No automation tokens.' : 'Loading…'}</li>
+		<li class="px-4 py-4 text-small text-muted">{tokens ? 'No automation tokens yet.' : 'Loading…'}</li>
 	{/each}
 </ul>
-<p class="mt-2 max-w-prose text-small text-muted">The API is described in <a class="link" href="/api/v1/automation/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a>. SFTP keys above never work here, and these tokens never work for SFTP.</p>
+</div>
+<p class="mt-2 text-small text-muted">The API is described in <a class="link" href="/api/v1/automation/openapi.yaml" target="_blank" rel="noopener">openapi.yaml</a>. SFTP keys never work here, and these tokens never work for SFTP.</p>
+</SettingsSection>
 
 <Dialog bind:open title={created ? 'Copy your token' : 'New automation token'} size="md">
 	{#if created}

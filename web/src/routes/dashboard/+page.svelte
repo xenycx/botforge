@@ -15,6 +15,7 @@
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Dialog from '$lib/components/ui/Dialog.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
+	import { currentWorkspace, selectWorkspace, workspaceName, workspaces } from '$lib/workspaces.svelte';
 
 	let bots = $state<Bot[] | null>(null);
 	let runtimes = $state<RuntimeInfo[]>([]);
@@ -116,10 +117,14 @@
 	const rank = { attention: 0, progress: 1, running: 2, stopped: 3 };
 	const mine = (b: Bot) => b.owner_id === session.user?.id;
 
+	// The workspace chosen in the sidebar scopes everything on this page.
+	const scoped = $derived((bots ?? []).filter((b) => workspaces.selected === 'all' || b.workspace_id === workspaces.selected));
+	const scope = $derived(currentWorkspace());
+	const multi = $derived(workspaces.list.length > 1 && workspaces.selected === 'all');
 	const shown = $derived.by(() => {
 		if (!bots) return [];
 		const needle = q.trim().toLowerCase();
-		const out = bots.filter(
+		const out = scoped.filter(
 			(b) =>
 				(!needle || b.name.toLowerCase().includes(needle) || b.runtime.includes(needle)) &&
 				(!stateF || group(b) === stateF) &&
@@ -139,11 +144,11 @@
 	});
 	const counts = $derived.by(() => {
 		const c = { running: 0, attention: 0, progress: 0, stopped: 0 };
-		for (const b of bots ?? []) c[group(b)]++;
+		for (const b of scoped) c[group(b)]++;
 		return c;
 	});
 	const filtered = $derived(!!(q.trim() || stateF || runtimeF || ownerF || tagF));
-	const allTags = $derived([...new Set((bots ?? []).flatMap((b) => b.tags))].sort());
+	const allTags = $derived([...new Set(scoped.flatMap((b) => b.tags))].sort());
 	const selectedBots = $derived((bots ?? []).filter((b) => selected[b.id]));
 	const selectable = $derived(shown.filter((b) => can(b, Perm.power)));
 	const allSelected = $derived(selectable.length > 0 && selectable.every((b) => selected[b.id]));
@@ -181,7 +186,7 @@
 			batchBusy = false;
 		}
 	}
-	const hasShared = $derived((bots ?? []).some((b) => b.shared));
+	const hasShared = $derived(scoped.some((b) => b.shared));
 	// Capacity strip: node reservation for administrators, account limits otherwise.
 	const capRows = $derived.by(() => {
 		const rows: { label: string; value: number; max: number; fmt: (n: number) => string }[] = [];
@@ -240,12 +245,12 @@
 
 <section class="card card-glow grid gap-6 p-6 sm:p-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
 	<div>
-		<p class="eyebrow">Overview</p>
+		<p class="eyebrow">Overview{scope ? ` · ${scope.personal ? 'Personal workspace' : scope.name}` : ''}</p>
 		<h1 class="mt-2 text-[2rem] leading-tight font-semibold tracking-tight sm:text-[2.25rem]">Manage your <span class="text-action">fleet</span>.</h1>
 		<p class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-muted">
 			{#if bots}
 				<span class="inline-flex items-center gap-1.5"><span class="side-dot" data-tone={counts.running ? 'run' : 'idle'}></span><span class="font-medium text-ink">{counts.running}</span> running</span>
-				<span aria-hidden="true">·</span><span><span class="font-medium text-ink">{bots.length}</span> bot{bots.length === 1 ? '' : 's'}</span>
+				<span aria-hidden="true">·</span><span><span class="font-medium text-ink">{scoped.length}</span> bot{scoped.length === 1 ? '' : 's'}</span>
 				{#if counts.attention}<span aria-hidden="true">·</span><button class="font-medium text-fail underline decoration-fail/40 underline-offset-2" onclick={() => (stateF = 'attention')}>{counts.attention} need{counts.attention === 1 ? 's' : ''} attention</button>{/if}
 				{#if counts.progress}<span aria-hidden="true">·</span><span class="text-warn">{counts.progress} in progress</span>{/if}
 			{:else}&nbsp;{/if}
@@ -333,8 +338,8 @@
 		</select>
 		</div>
 		<div class="flex rounded-control border border-rule bg-raised p-0.5" role="group" aria-label="Layout">
-			<button class="grid size-8 place-items-center rounded-[3px] {view === 'grid' ? 'bg-paper-2 text-ink' : 'text-muted hover:text-ink'}" aria-pressed={view === 'grid'} aria-label="Cards" onclick={() => setView('grid')}><Icon name="grid" size={15} /></button>
-			<button class="grid size-8 place-items-center rounded-[3px] {view === 'list' ? 'bg-paper-2 text-ink' : 'text-muted hover:text-ink'}" aria-pressed={view === 'list'} aria-label="List" onclick={() => setView('list')}><Icon name="list" size={15} /></button>
+			<button class="grid size-8 place-items-center rounded-inner {view === 'grid' ? 'bg-paper-2 text-ink' : 'text-muted hover:text-ink'}" aria-pressed={view === 'grid'} aria-label="Cards" onclick={() => setView('grid')}><Icon name="grid" size={15} /></button>
+			<button class="grid size-8 place-items-center rounded-inner {view === 'list' ? 'bg-paper-2 text-ink' : 'text-muted hover:text-ink'}" aria-pressed={view === 'list'} aria-label="List" onclick={() => setView('list')}><Icon name="list" size={15} /></button>
 		</div>
 	</div>
 {/if}
@@ -364,6 +369,14 @@
 				<a href="/bots/new?source=blank" class="btn">Empty bot</a>
 			{/snippet}
 		</EmptyState>
+	{:else if scoped.length === 0}
+		<EmptyState title="No bots in {scope?.personal ? 'your personal workspace' : (scope?.name ?? 'this workspace')} yet" compact>
+			<p>Bots you create while this workspace is selected go into it. Members of the workspace can see and operate them according to their role.</p>
+			{#snippet actions()}
+				<a href="/bots/new" class="btn btn-primary"><Icon name="plus" />New bot here</a>
+				<button class="btn" onclick={() => selectWorkspace('all')}>Show all workspaces</button>
+			{/snippet}
+		</EmptyState>
 	{:else if shown.length === 0}
 		<EmptyState title="No bots match these filters" compact>
 			{#snippet actions()}<button class="btn" onclick={clearFilters}>Clear filters</button>{/snippet}
@@ -377,9 +390,9 @@
 		{#if view === 'grid'}
 			<ul class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
 				<li>
-					<a href="/bots/new" class="grid h-full min-h-72 place-items-center rounded-[14px] border border-dashed border-rule p-6 text-center transition-colors hover:border-action/60 hover:bg-panel">
+					<a href="/bots/new" class="grid h-full min-h-72 place-items-center rounded-card border border-dashed border-rule p-6 text-center transition-colors hover:border-action/60 hover:bg-panel">
 						<span>
-							<span class="mx-auto grid size-11 place-items-center rounded-full bg-paper-2 text-ink"><Icon name="plus" size={18} /></span>
+							<span class="mx-auto grid size-11 place-items-center rounded-pill bg-paper-2 text-ink"><Icon name="plus" size={18} /></span>
 							<span class="mt-4 block text-title font-semibold">New deployment</span>
 							<span class="mt-1 block text-small text-muted">GitHub, template, ZIP upload or an empty bot.</span>
 						</span>
@@ -389,7 +402,7 @@
 					{@const d = describe(b, now)}
 					<li class="card flex flex-col p-5">
 						<div class="flex items-start justify-between gap-2">
-							<span class="grid size-10 shrink-0 place-items-center rounded-[10px] bg-paper-2 font-mono text-small font-medium text-action" aria-hidden="true">{b.template_id === 'discordts' ? 'TS' : (runtimeTag[b.runtime] ?? b.runtime.slice(0, 2).toUpperCase())}</span>
+							{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-10 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" />{:else}<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 font-mono text-small font-medium text-action" aria-hidden="true">{b.template_id === 'discordts' ? 'TS' : (runtimeTag[b.runtime] ?? b.runtime.slice(0, 2).toUpperCase())}</span>{/if}
 							<div class="flex items-center gap-1.5">
 								<span class="pill" data-tone={d.tone} title={d.detail || undefined}><span class="side-dot !m-0 !size-1.5" data-tone={d.tone}></span>{d.label}</span>
 								{#if can(b, Perm.power) && session.features.runner}
@@ -403,7 +416,7 @@
 								<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill={b.favorite ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
 							</button>
 						</div>
-						<p class="truncate text-small text-muted">{source(b)}{#if b.shared} · shared with you{/if}</p>
+						<p class="truncate text-small text-muted">{source(b)}{b.shared ? ' · shared with you' : multi && workspaceName(b.workspace_id) ? ` · ${workspaceName(b.workspace_id)}` : ''}</p>
 						<dl class="mt-4 grid grid-cols-3 gap-2 border-t border-rule-soft pt-4">
 							<div><dt class="eyebrow">RAM</dt><dd class="mt-0.5 font-mono text-small font-medium">{fmtBytes(b.memory_bytes)}</dd></div>
 							<div><dt class="eyebrow">CPU</dt><dd class="mt-0.5 font-mono text-small font-medium">{fmtCpu(b.nano_cpus)}</dd></div>
@@ -438,6 +451,7 @@
 				{@const d = describe(b, now)}
 				<li class="spine grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-rule-soft py-3 pr-2 pl-5 last:border-b-0 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.6fr)_10rem_auto]" data-tone={d.tone} data-busy={d.busy}>
 					<div class="flex min-w-0 items-start gap-2">
+						{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-8 shrink-0 rounded-lg object-cover" referrerpolicy="no-referrer" />{/if}
 						{#if can(b, Perm.power) && session.features.runner}
 							<input type="checkbox" class="mt-1.5 shrink-0" aria-label="Select {b.name}" bind:checked={selected[b.id]} />
 						{/if}

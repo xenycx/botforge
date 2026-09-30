@@ -8,6 +8,8 @@
 	import { toast } from '$lib/ui/toast.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import AutomationTokens from '$lib/components/AutomationTokens.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 
 	let sftp = $state<{ enabled: boolean; port?: string; fingerprint?: string } | null>(null);
 	let keys = $state<ApiKey[]>([]);
@@ -56,46 +58,49 @@
 
 <svelte:head><title>SFTP & API keys · BotForge</title></svelte:head>
 
-<h2 class="text-section">SFTP access</h2>
-{#if sftp && !sftp.enabled}
-	<p class="mt-2 max-w-prose text-muted">The SFTP server is turned off on this panel. The administrator can enable it with <code class="font-mono">BOTPANEL_SFTP_LISTEN</code>.</p>
-{:else if sftp}
-	<p class="mt-2 max-w-prose text-muted">Use any SFTP client (FileZilla, Cyberduck, <code class="font-mono">sftp</code>). You see one folder per bot you can edit.</p>
-	<dl class="mt-3 grid max-w-2xl grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border border-rule-soft bg-panel p-4">
-		<dt class="text-muted">Host</dt><dd><code class="font-mono">{host}</code> <span class="text-muted">(connect to the server itself: SFTP does not go through a web proxy or tunnel)</span></dd>
-		<dt class="text-muted">Port</dt><dd><code class="font-mono">{sftp.port}</code></dd>
-		<dt class="text-muted">Username</dt><dd><code class="font-mono">{session.user?.email}</code></dd>
-		<dt class="text-muted">Password</dt><dd>your panel password, or an API key from below (required if you sign in with GitHub or Discord only)</dd>
-		<dt class="text-muted">Host key</dt><dd><code class="break-all font-mono text-[13px]">{sftp.fingerprint}</code></dd>
-	</dl>
-{/if}
+<SettingsSection title="SFTP access" description="Use any SFTP client (FileZilla, Cyberduck, sftp). You see one folder per bot you can edit.">
+	{#if sftp && !sftp.enabled}
+		<Notice>The SFTP server is turned off on this panel. The administrator can enable it with <code class="font-mono">BOTPANEL_SFTP_LISTEN</code>.</Notice>
+	{:else if sftp}
+		<dl class="card grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2.5 p-5">
+			<dt class="text-muted">Host</dt><dd><code class="copyable font-mono">{host}</code> <span class="text-small text-muted">connect to the server itself: SFTP does not go through a web proxy or tunnel</span></dd>
+			<dt class="text-muted">Port</dt><dd><code class="copyable font-mono">{sftp.port}</code></dd>
+			<dt class="text-muted">Username</dt><dd><code class="copyable font-mono">{session.user?.email}</code></dd>
+			<dt class="text-muted">Password</dt><dd class="text-small">Your panel password, or an SFTP key from below (required if you sign in with GitHub or Discord only, or use two-step sign-in).</dd>
+			<dt class="text-muted">Host key</dt><dd><code class="break-all font-mono text-[13px]">{sftp.fingerprint}</code></dd>
+		</dl>
+	{/if}
+</SettingsSection>
 
-<h2 class="mt-10 text-section">SFTP keys</h2>
-<p class="mt-1 max-w-prose text-muted">Keys let SFTP clients sign in without your password. A key works only for your account and can be deleted at any time.</p>
-<ul class="mt-3 max-w-2xl divide-y divide-rule-soft border-y border-rule-soft">
-	{#each keys as k (k.id)}
-		<li class="flex items-center gap-3 py-2">
-			<div class="min-w-0 flex-1">
-				<div class="font-medium">{k.name} <code class="ml-1 font-mono text-[12px] text-muted">{k.prefix}…</code></div>
-				<div class="text-muted">Created {fmtTime(k.created_at_ms)} · {k.last_used_at_ms ? `last used ${fmtTime(k.last_used_at_ms)}` : 'never used'} · {k.expires_at_ms ? `expires ${fmtTime(k.expires_at_ms)}` : 'no expiry'}</div>
-			</div>
-			<button class="btn btn-danger" onclick={() => remove(k)}>Delete</button>
-		</li>
-	{:else}
-		<li class="py-3 text-muted">No API keys.</li>
-	{/each}
-</ul>
-<form class="mt-4 grid max-w-2xl gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end" onsubmit={create}>
-	<label class="block"><span class="label">Name</span><input class="field" required maxlength="64" bind:value={name} placeholder="Laptop FileZilla" /></label>
-	<label class="block"><span class="label">Expires in (days)</span><input class="field" type="number" min="0" max="3650" bind:value={days} /><span class="help">0 means it never expires</span></label>
-	<button class="btn btn-primary">Create key</button>
-</form>
-{#if created}
-	<Notice tone="warn" class="mt-3 max-w-2xl" title="Copy the key now">
-		It is shown only once.<br /><code class="break-all">{created}</code>
-		{#snippet action()}<button class="btn btn-sm" onclick={() => navigator.clipboard?.writeText(created).then(() => toast('Key copied'))}>Copy</button>{/snippet}
-	</Notice>
-{/if}
-{#if error}<Notice tone="fail" class="mt-3" live>{error}</Notice>{/if}
+<SettingsSection title="SFTP keys" description="Keys let SFTP clients sign in without your password. A key works only for your account and can be deleted at any time.">
+	<div class="card overflow-hidden">
+		<ul class="divide-y divide-rule-soft">
+			{#each keys as k (k.id)}
+				<li class="flex flex-wrap items-center gap-3 px-4 py-3">
+					<div class="min-w-0 flex-1">
+						<div class="font-medium">{k.name} <code class="ml-1 font-mono text-[12px] text-muted">{k.prefix}…</code></div>
+						<div class="text-small text-muted">Created {fmtTime(k.created_at_ms)} · {k.last_used_at_ms ? `last used ${fmtTime(k.last_used_at_ms)}` : 'never used'} · {k.expires_at_ms ? `expires ${fmtTime(k.expires_at_ms)}` : 'no expiry'}</div>
+					</div>
+					<button class="btn btn-sm btn-danger" onclick={() => remove(k)}>Delete</button>
+				</li>
+			{:else}
+				<li class="px-4 py-4 text-small text-muted">No SFTP keys yet.</li>
+			{/each}
+		</ul>
+		<form class="grid gap-3 border-t border-rule-soft bg-paper/40 p-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end" onsubmit={create}>
+			<label class="block"><span class="label">Name</span><input class="field" required maxlength="64" bind:value={name} placeholder="Laptop FileZilla" /></label>
+			<label class="block"><span class="label">Expires in (days)</span><input class="field" type="number" min="0" max="3650" bind:value={days} /></label>
+			<button class="btn btn-primary"><Icon name="plus" size={14} />Create key</button>
+			<p class="text-small text-muted sm:col-span-3">0 days means the key never expires.</p>
+		</form>
+	</div>
+	{#if created}
+		<Notice tone="warn" class="mt-3" title="Copy the key now">
+			It is shown only once.<br /><code class="break-all">{created}</code>
+			{#snippet action()}<button class="btn btn-sm" onclick={() => navigator.clipboard?.writeText(created).then(() => toast('Key copied'))}>Copy</button>{/snippet}
+		</Notice>
+	{/if}
+	{#if error}<Notice tone="fail" class="mt-3" live>{error}</Notice>{/if}
+</SettingsSection>
 
-{#if session.features.automation}<div class="mt-12"><AutomationTokens /></div>{/if}
+{#if session.features.automation}<AutomationTokens />{/if}

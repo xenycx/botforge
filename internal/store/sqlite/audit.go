@@ -35,8 +35,10 @@ func (db *DB) ListAudit(ctx context.Context, f AuditFilter) ([]domain.AuditEvent
 	}
 	if f.BotsOf != "" {
 		where = append(where, `bot_id IN (SELECT id FROM bots WHERE owner_id = ? AND desired_state != 'deleted'
-			UNION SELECT bot_id FROM bot_subusers WHERE user_id = ?)`)
-		args = append(args, f.BotsOf, f.BotsOf)
+			UNION SELECT bot_id FROM bot_subusers WHERE user_id = ?
+			UNION SELECT b.id FROM bots b JOIN workspace_members m ON m.workspace_id = b.workspace_id
+				WHERE m.user_id = ? AND b.desired_state != 'deleted')`)
+		args = append(args, f.BotsOf, f.BotsOf, f.BotsOf)
 	}
 	if f.BeforeID > 0 {
 		where, args = append(where, "id < ?"), append(args, f.BeforeID)

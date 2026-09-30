@@ -25,6 +25,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -55,6 +57,7 @@ import (
 	"botpanel/internal/secrets"
 	"botpanel/internal/service"
 	"botpanel/internal/sftpd"
+	"botpanel/internal/sitehost"
 	"botpanel/internal/store/sqlite"
 	"botpanel/internal/telemetry"
 	"botpanel/internal/webui"
@@ -602,15 +605,45 @@ func serve(log *slog.Logger) error {
 			enabledOAuth = append(enabledOAuth, p)
 		}
 	}
+	// Static site hosting: its own listener, never the panel's origin.
+	var sitesSvc *service.SiteService
+	var sitesSrv *http.Server
+	if cfg.SitesListen != "" {
+		panelURL := oauthSvc.CurrentPublicURL()
+		if panelURL == "" {
+			panelURL = cfg.PublicURL
+		}
+		panelHost := ""
+		if u, err := url.Parse(panelURL); err == nil {
+			panelHost = u.Hostname()
+		}
+		sitesSvc = &service.SiteService{Store: db, Bots: botSvc, OAuth: oauthSvc, GH: &github.Client{}, Dir: cfg.SitesDir,
+			BaseURL: cfg.SitesBaseURL, DNSTarget: cfg.SitesDNSTarget, PanelHost: panelHost, MaxBytes: cfg.SiteMaxBytes,
+			MaxPerUser: cfg.MaxSitesPerUser, Log: log}
+		if err := sitesSvc.Start(ctx); err != nil {
+			return err
+		}
+		sln, err := net.Listen("tcp", cfg.SitesListen)
+		if err != nil {
+			return fmt.Errorf("sites listen: %w", err)
+		}
+		sitesSrv = sitehost.NewServer(&sitehost.Handler{Sites: sitesSvc, Log: log})
+		log.Info("sites listening", "addr", sln.Addr().String(), "base_url", cfg.SitesBaseURL)
+		go func() {
+			if err := sitesSrv.Serve(sln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("sites server", "err", err)
+			}
+		}()
+	}
 	migs, _ := fs.Glob(migrations.FS, "*.sql")
 	dsrc := diagSources{cfg: cfg, db: db, files: wsm, catalog: catalog, keys: keys, runnerStatus: runnerStatus,
 		oauth: enabledOAuth, knownSchema: migrationCount(migs)}
 	diagnostics := func(ctx context.Context) diag.Report { return diag.Run(ctx, version, started, probes(dsrc)) }
 	app := api.New(api.Deps{Diagnostics: diagnostics, Log: log, Deploy: deploySvc, Backups: backupSvc, Stats: statsSrc, SFTP: sftpInfo, Analytics: analytics, PublicURL: cfg.PublicURL, DB: db, UI: webui.FS(), Auth: authSvc, Bots: botSvc, OAuth: oauthSvc,
-		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,
+		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, MetricsToken: cfg.MetricsToken, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,
 		Console: consoleSvc, BaseCtx: ctx, RunnerReady: runnerReady, Ops: ops, Audit: audit, Schedules: scheduler,
 		MFA: &service.MFAService{Store: db, Keys: keys, Auth: authSvc}, Tokens: &service.TokenService{Store: db, Bots: botSvc}, Health: health,
-		Settings: settingsSvc, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
+		Settings: settingsSvc, Sites: sitesSvc, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
@@ -632,6 +665,10 @@ func serve(log *slog.Logger) error {
 	defer shCancel()
 	if err := app.ShutdownWithContext(shCtx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+	if sitesSrv != nil {
+		_ = sitesSrv.Shutdown(shCtx)
+		sitesSvc.Wait()
 	}
 	backupSvc.Wait()
 	if deploySvc != nil {

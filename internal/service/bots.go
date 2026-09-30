@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -70,6 +71,7 @@ type CreateBotInput struct {
 	NanoCPUs    int64
 	PidsLimit   int64
 	NodeID      string
+	WorkspaceID string  // "" = the creator's personal workspace
 	SourceType  string  // manual (default) | template | github
 	TemplateID  *string // set for SourceType template
 	// Env are initial variables (e.g. the template's DISCORD_TOKEN), sealed
@@ -142,10 +144,22 @@ func (s *BotService) loadPerm(ctx context.Context, actor domain.User, id string,
 	if b.OwnerID == actor.ID || actor.IsAdmin() {
 		return b, nil
 	}
-	mask, err := s.Store.GetSubUserPermissions(ctx, id, actor.ID)
+	role, err := s.Store.BotWorkspaceRole(ctx, id, actor.ID)
 	if err != nil {
-		return domain.Bot{}, err // ErrNotFound: no grant at all
+		return domain.Bot{}, err
 	}
+	// Workspace owners and admins act as the bot's owner.
+	if domain.WorkspaceRoleRank(role) >= domain.WorkspaceRoleRank(domain.WorkspaceAdmin) {
+		return b, nil
+	}
+	mask, err := s.Store.GetSubUserPermissions(ctx, id, actor.ID)
+	if errors.Is(err, domain.ErrNotFound) && role != "" {
+		mask, err = 0, nil
+	}
+	if err != nil {
+		return domain.Bot{}, err // ErrNotFound: no grant and no membership
+	}
+	mask |= domain.WorkspaceRolePerms(role)
 	if perm == permOwnerOnly || (perm != permAny && !domain.HasPerm(mask, perm)) {
 		return domain.Bot{}, domain.ErrForbidden
 	}
@@ -158,6 +172,8 @@ func (s *BotService) Permissions(ctx context.Context, actor domain.User, b domai
 		return domain.PermAll
 	}
 	mask, _ := s.Store.GetSubUserPermissions(ctx, b.ID, actor.ID)
+	role, _ := s.Store.BotWorkspaceRole(ctx, b.ID, actor.ID)
+	mask |= domain.WorkspaceRolePerms(role)
 	if mask&domain.PermFullAdmin != 0 {
 		return domain.PermAll
 	}
@@ -225,6 +241,10 @@ func (s *BotService) Create(ctx context.Context, actor domain.User, in CreateBot
 	if err := s.checkUserBudget(ctx, actor, 1, mem); err != nil {
 		return domain.Bot{}, err
 	}
+	wsID, err := s.creatableWorkspace(ctx, actor, in.WorkspaceID)
+	if err != nil {
+		return domain.Bot{}, err
+	}
 	nodeID := in.NodeID
 	if nodeID == "" {
 		nodeID = s.LocalNode
@@ -236,7 +256,7 @@ func (s *BotService) Create(ctx context.Context, actor domain.User, in CreateBot
 
 	now := s.now()
 	b := domain.Bot{
-		ID: uuid.NewString(), OwnerID: actor.ID, NodeID: nodeID, Name: name, Runtime: rt.ID, ImageRef: rt.ImageRef(),
+		ID: uuid.NewString(), OwnerID: actor.ID, WorkspaceID: wsID, NodeID: nodeID, Name: name, Runtime: rt.ID, ImageRef: rt.ImageRef(),
 		Argv: argv, MemoryBytes: mem, NanoCPUs: cpu, PidsLimit: pids,
 		DesiredState: domain.DesiredStopped, ObservedState: "stopped", CreatedAtMS: now, UpdatedAtMS: now,
 		SourceType: in.SourceType, TemplateID: in.TemplateID, RestartPolicy: domain.RestartOnFailure,

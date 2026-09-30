@@ -7,6 +7,8 @@
 	import Dialog from '$lib/components/ui/Dialog.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 
 	type Status = { enabled: boolean; enabled_at_ms: number | null; recovery_left: number };
 	let status = $state<Status | null>(null);
@@ -113,24 +115,35 @@
 	}
 </script>
 
-<section aria-labelledby="mfa-h" class="max-w-xl">
-	<div class="flex flex-wrap items-center gap-2">
-		<h2 id="mfa-h" class="text-section">Two-step sign-in</h2>
-		{#if status?.enabled}<span class="eyebrow rounded-control border border-run/40 px-1.5 py-0.5 text-run">On</span>{:else if status}<span class="eyebrow rounded-control border border-rule px-1.5 py-0.5">Off</span>{/if}
+<SettingsSection title="Two-step sign-in" description="After your password or provider sign-in, the panel also asks for a code from an authenticator app such as 1Password, Google Authenticator or Aegis.">
+	{#snippet badge()}
+		{#if status?.enabled}<span class="pill" data-tone="run">On</span>{:else if status}<span class="pill">Off</span>{/if}
+	{/snippet}
+	<div class="card p-5">
+		{#if error}<Notice tone="fail" class="mb-3">{error}</Notice>{/if}
+		{#if status?.enabled}
+			<div class="flex flex-wrap items-center gap-4">
+				<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-run/12 text-run"><Icon name="shield" /></span>
+				<div class="min-w-0 flex-1 basis-56">
+					<p class="font-medium">On since {fmtWhen(status.enabled_at_ms ?? 0)}</p>
+					<p class="text-small {status.recovery_left <= 3 ? 'text-warn' : 'text-muted'}">{status.recovery_left} of 10 recovery codes left. SFTP now needs an <a class="link" href="/settings/sftp">SFTP key</a> instead of your password.</p>
+				</div>
+				<div class="flex flex-wrap gap-2">
+					<button class="btn" onclick={() => startAct('codes')}>New recovery codes</button>
+					<button class="btn btn-danger" onclick={() => startAct('disable')}>Turn off</button>
+				</div>
+			</div>
+		{:else if status}
+			<div class="flex flex-wrap items-center gap-4">
+				<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 text-muted"><Icon name="shield" /></span>
+				<p class="min-w-0 flex-1 basis-56 text-small text-muted">Not set up. It takes about a minute and protects your bots if your password leaks.</p>
+				<button class="btn btn-primary" onclick={start}><Icon name="shield" />Set up two-step sign-in</button>
+			</div>
+		{:else if !error}
+			<Skeleton rows={1} />
+		{/if}
 	</div>
-	<p class="mt-1 text-muted">After your password or provider sign-in, the panel also asks for a code from an authenticator app on your phone, such as 1Password, Google Authenticator or Aegis.</p>
-	{#if error}<Notice tone="fail" class="mt-3">{error}</Notice>{/if}
-	{#if status?.enabled}
-		<p class="mt-3">On since {fmtWhen(status.enabled_at_ms ?? 0)}. <span class={status.recovery_left <= 3 ? 'text-warn' : 'text-muted'}>{status.recovery_left} of 10 recovery codes left.</span></p>
-		<p class="mt-1 text-small text-muted">SFTP no longer accepts your account password; use an SFTP key from <a class="link" href="/settings/sftp">SFTP and API keys</a>.</p>
-		<div class="mt-3 flex flex-wrap gap-2">
-			<button class="btn" onclick={() => startAct('codes')}>New recovery codes</button>
-			<button class="btn btn-danger" onclick={() => startAct('disable')}>Turn off</button>
-		</div>
-	{:else if status}
-		<div class="mt-3"><button class="btn btn-primary" onclick={start}><Icon name="shield" />Set up two-step sign-in</button></div>
-	{/if}
-</section>
+</SettingsSection>
 
 <Dialog bind:open title={stage === 'codes' ? 'Save your recovery codes' : 'Set up two-step sign-in'} size="md">
 	{#if stage === 'confirm'}

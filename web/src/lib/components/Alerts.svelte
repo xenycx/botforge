@@ -12,8 +12,11 @@
 
 	type Prefs = { crash: boolean; deploy: boolean; backup: boolean; recovery: boolean; heartbeat_after_s: number };
 	type Health = { state: 'unknown' | 'ok' | 'stale' | 'not_ready'; last_seen_at_ms: number | null; ready: boolean | null; alerts: Prefs; webhook: boolean };
+	type Probe = { kind: ''|'tcp'|'http'; host_port: number; path: string; interval_s: number; timeout_ms: number; failure_threshold: number; success_threshold: number; startup_grace_s: number; restart_unhealthy: boolean; status: 'disabled'|'unknown'|'starting'|'healthy'|'unhealthy'; consecutive_failures: number; consecutive_successes: number; last_checked_at_ms: number|null; last_error: string|null };
 	let health = $state<Health | null>(null);
 	let prefs = $state<Prefs | null>(null);
+	let probe = $state<Probe | null>(null);
+	let probeDraft = $state<Probe | null>(null);
 	let error = $state('');
 	let saving = $state(false);
 	let now = $state(Date.now());
@@ -22,8 +25,9 @@
 
 	async function load(first = false) {
 		try {
-			health = await api<Health>('GET', `${path}/health`);
-			if (first) prefs = { ...health.alerts };
+			const [h,p] = await Promise.all([api<Health>('GET', `${path}/health`), api<Probe>('GET', `${path}/health-probe`)]);
+			health = h; probe = p;
+			if (first) { prefs = { ...health.alerts }; probeDraft = { ...p }; }
 			error = '';
 		} catch (e) {
 			error = msg(e);
@@ -39,6 +43,7 @@
 	});
 
 	const dirty = $derived(!!prefs && !!health && JSON.stringify(prefs) !== JSON.stringify(health.alerts));
+	const probeDirty = $derived(!!probe && !!probeDraft && JSON.stringify({ ...probeDraft, status:probe.status, consecutive_failures:probe.consecutive_failures, consecutive_successes:probe.consecutive_successes, last_checked_at_ms:probe.last_checked_at_ms, last_error:probe.last_error }) !== JSON.stringify(probe));
 	async function save() {
 		if (!prefs) return;
 		saving = true;
@@ -61,6 +66,11 @@
 			toast(msg(e), 'fail');
 		}
 	}
+	async function saveProbe() {
+		if (!probeDraft) return; saving=true;
+		try { probe = await api<Probe>('PUT', `${path}/health-probe`, probeDraft); probeDraft={...probe}; toast(probe.kind ? 'Health probe saved' : 'Health probe disabled','success'); }
+		catch(e){toast(msg(e),'fail')} finally {saving=false}
+	}
 
 	const stateText = {
 		unknown: ['Unknown', 'The bot has not reported yet. Add the BotForge SDK (Analytics section) to see whether it is connected to Discord, not just whether its process runs.'],
@@ -77,6 +87,8 @@
 	];
 	const thresholds = [0, 60, 120, 300, 600, 1800, 3600];
 	const thrLabel = (s: number) => (s === 0 ? 'Off' : s < 3600 ? `${s / 60} minute${s === 60 ? '' : 's'}` : '1 hour');
+	const tcpPorts = $derived(bot.ports.filter((p)=>p.protocol==='tcp'));
+	const probeTone = $derived(probe?.status==='healthy'?'run':probe?.status==='unhealthy'?'fail':probe?.status==='starting'?'warn':'idle');
 </script>
 
 {#if error}<Notice tone="fail">{error}</Notice>{/if}
@@ -88,6 +100,29 @@
 		<p class="mt-1 text-title font-semibold">{stateText[health.state][0]}{#if health.last_seen_at_ms}<span class="ml-2 text-small font-normal text-muted">last push {fmtAgo(health.last_seen_at_ms, now)}</span>{/if}</p>
 		<p class="mt-0.5 max-w-prose text-muted">{stateText[health.state][1]}</p>
 		{#if bot.restart_count}<p class="mt-1 text-small text-warn">{bot.restart_count} crash{bot.restart_count === 1 ? '' : 'es'} in a row in the current run.</p>{/if}
+	</section>
+
+	<section aria-labelledby="probe-h" class="mt-8 max-w-2xl">
+		<div class="spine border-y border-rule-soft bg-panel py-3 pr-4 pl-5" data-tone={probeTone}>
+			<p class="eyebrow">TCP / HTTP probe</p>
+			<p class="mt-1 text-title font-semibold capitalize">{probe?.status ?? 'Disabled'}{#if probe?.last_checked_at_ms}<span class="ml-2 text-small font-normal text-muted">checked {fmtAgo(probe.last_checked_at_ms,now)}</span>{/if}</p>
+			<p class="mt-0.5 text-muted">Checks a published TCP port from the host. Failed checks can restart a stuck process even when it has not exited.</p>
+			{#if probe?.last_error}<p class="mt-1 text-small text-fail">{probe.last_error}</p>{/if}
+		</div>
+		{#if probeDraft}
+			<div class="mt-4 grid gap-4 sm:grid-cols-2">
+				<label><span class="label">Probe type</span><select class="field" bind:value={probeDraft.kind} disabled={!admin}><option value="">Disabled</option><option value="tcp">TCP connection</option><option value="http">HTTP GET</option></select></label>
+				<label><span class="label">Published port</span><select class="field" bind:value={probeDraft.host_port} disabled={!admin||!probeDraft.kind}><option value={0}>Choose a TCP port</option>{#each tcpPorts as p}<option value={p.host_port}>{p.host_port} → container {p.container_port}</option>{/each}</select></label>
+				{#if probeDraft.kind==='http'}<label class="sm:col-span-2"><span class="label">HTTP path</span><input class="field" maxlength="256" placeholder="/healthz" bind:value={probeDraft.path} disabled={!admin} /></label>{/if}
+				<label><span class="label">Check every</span><select class="field" bind:value={probeDraft.interval_s} disabled={!admin||!probeDraft.kind}>{#each [5,10,15,30,60,120,300] as s}<option value={s}>{s} seconds</option>{/each}</select></label>
+				<label><span class="label">Timeout</span><select class="field" bind:value={probeDraft.timeout_ms} disabled={!admin||!probeDraft.kind}>{#each [500,1000,2000,5000,10000] as ms}<option value={ms}>{ms/1000} seconds</option>{/each}</select></label>
+				<label><span class="label">Failures before unhealthy</span><input class="field" type="number" min="1" max="10" bind:value={probeDraft.failure_threshold} disabled={!admin||!probeDraft.kind} /></label>
+				<label><span class="label">Startup grace</span><select class="field" bind:value={probeDraft.startup_grace_s} disabled={!admin||!probeDraft.kind}>{#each [0,10,30,60,120,300,600] as s}<option value={s}>{s} seconds</option>{/each}</select></label>
+			</div>
+			<label class="mt-4 flex items-start gap-2.5"><input type="checkbox" class="mt-0.5" bind:checked={probeDraft.restart_unhealthy} disabled={!admin||!probeDraft.kind} /><span>Restart when unhealthy<span class="help mt-0">Restarts once when the failure threshold is crossed. Startup grace prevents deploy loops.</span></span></label>
+			{#if !tcpPorts.length}<Notice tone="warn" class="mt-3">Publish a TCP port in Network before enabling a probe.</Notice>{/if}
+			{#if admin}<div class="mt-4 flex gap-2"><button class="btn btn-primary" disabled={!probeDirty||saving} onclick={saveProbe}>Save health probe</button>{#if probeDirty}<button class="btn btn-quiet" onclick={()=>probe&&(probeDraft={...probe})}>Discard</button>{/if}</div>{/if}
+		{/if}
 	</section>
 
 	<section aria-labelledby="al-h" class="mt-8 max-w-2xl">

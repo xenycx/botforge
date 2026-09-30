@@ -12,7 +12,8 @@ const botCols = `id, owner_id, node_id, name, runtime, image_ref, argv_json, mem
 	observed_at_ms, created_at_ms, updated_at_ms,
 	entrypoint_json, source_type, template_id, network_enabled, bandwidth_kbps,
 	restart_policy, restart_max_attempts, restart_backoff_initial_ms, restart_backoff_max_ms, auto_backup,
-	restart_count, next_retry_at_ms, state_reason, last_started_at_ms`
+	restart_count, next_retry_at_ms, state_reason, last_started_at_ms,
+	discord_user_id, discord_username, discord_avatar_url, COALESCE(workspace_id, '')`
 
 func scanBot(row interface{ Scan(...any) error }) (domain.Bot, error) {
 	var b domain.Bot
@@ -24,7 +25,8 @@ func scanBot(row interface{ Scan(...any) error }) (domain.Bot, error) {
 		&b.LastExitCode, &b.LastError, &b.ObservedAtMS, &b.CreatedAtMS, &b.UpdatedAtMS,
 		&entry, &b.SourceType, &b.TemplateID, &netEnabled, &b.BandwidthKbps,
 		&b.RestartPolicy, &b.RestartMaxAttempts, &b.RestartBackoffInitialMS, &b.RestartBackoffMaxMS, &autoBackup,
-		&b.RestartCount, &b.NextRetryAtMS, &b.StateReason, &b.LastStartedAtMS)
+		&b.RestartCount, &b.NextRetryAtMS, &b.StateReason, &b.LastStartedAtMS,
+		&b.DiscordUserID, &b.DiscordUsername, &b.DiscordAvatarURL, &b.WorkspaceID)
 	if err != nil {
 		return b, mapErr(err)
 	}
@@ -36,6 +38,17 @@ func scanBot(row interface{ Scan(...any) error }) (domain.Bot, error) {
 		}
 	}
 	return b, json.Unmarshal([]byte(argv), &b.Argv)
+}
+
+func (db *DB) SetBotDiscordIdentity(ctx context.Context, botID, userID, username, avatarURL string, nowMS int64) error {
+	res, err := db.ExecContext(ctx, `UPDATE bots SET discord_user_id=?,discord_username=?,discord_avatar_url=?,updated_at_ms=? WHERE id=?`, userID, username, avatarURL, nowMS, botID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func nullJSON(v []string) (*string, error) {
@@ -76,13 +89,14 @@ func (db *DB) CreateBot(ctx context.Context, b domain.Bot) error {
 	_, err = db.ExecContext(ctx, `INSERT INTO bots (id, owner_id, node_id, name, runtime, image_ref, argv_json,
 		memory_bytes, nano_cpus, pids_limit, created_at_ms, updated_at_ms,
 		entrypoint_json, source_type, template_id, network_enabled, bandwidth_kbps,
-		restart_policy, restart_max_attempts, restart_backoff_initial_ms, restart_backoff_max_ms)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?)`,
+		restart_policy, restart_max_attempts, restart_backoff_initial_ms, restart_backoff_max_ms, workspace_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,
+			COALESCE(NULLIF(?, ''), (SELECT id FROM workspaces WHERE owner_id = ?2 AND personal = 1)))`,
 		b.ID, b.OwnerID, b.NodeID, b.Name, b.Runtime, b.ImageRef, string(argv), b.MemoryBytes, b.NanoCPUs,
 		b.PidsLimit, b.CreatedAtMS, b.UpdatedAtMS,
 		entry, defaultStr(b.SourceType, "manual"), b.TemplateID, boolInt(!b.NetworkDisabled), b.BandwidthKbps,
 		defaultStr(b.RestartPolicy, domain.RestartOnFailure), defaultInt(b.RestartMaxAttempts, 5),
-		defaultInt(b.RestartBackoffInitialMS, 2000), defaultInt(b.RestartBackoffMaxMS, 300000))
+		defaultInt(b.RestartBackoffInitialMS, 2000), defaultInt(b.RestartBackoffMaxMS, 300000), b.WorkspaceID)
 	return mapErr(err)
 }
 
@@ -120,10 +134,17 @@ func (db *DB) ListBots(ctx context.Context, ownerID string) ([]domain.Bot, error
 	return out, rows.Err()
 }
 
-// ListBotsForUser returns bots the user owns or that are shared with them.
+// visibleBotsSQL selects the ids of bots a user (?) can see: owned, shared
+// with them, or in a workspace they are a member of.
+const visibleBotsSQL = `SELECT id FROM bots WHERE owner_id = ?1
+	UNION SELECT bot_id FROM bot_subusers WHERE user_id = ?1
+	UNION SELECT b.id FROM bots b JOIN workspace_members m ON m.workspace_id = b.workspace_id WHERE m.user_id = ?1`
+
+// ListBotsForUser returns bots the user owns, that are shared with them, or
+// that are in one of their workspaces.
 func (db *DB) ListBotsForUser(ctx context.Context, userID string) ([]domain.Bot, error) {
-	rows, err := db.QueryContext(ctx, `SELECT `+botCols+` FROM bots WHERE owner_id = ?1
-		OR id IN (SELECT bot_id FROM bot_subusers WHERE user_id = ?1) ORDER BY created_at_ms LIMIT 1000`, userID)
+	rows, err := db.QueryContext(ctx, `SELECT `+botCols+` FROM bots WHERE id IN (`+visibleBotsSQL+`)
+		ORDER BY created_at_ms LIMIT 1000`, userID)
 	if err != nil {
 		return nil, err
 	}

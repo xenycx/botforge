@@ -92,7 +92,7 @@
 <main class="min-h-dvh px-4 py-8 sm:py-14">
 	<div class="mx-auto max-w-5xl">
 		<div class="flex items-center gap-2.5">
-			<img src="/favicon.svg" alt="" width="34" height="34" class="rounded-[9px]" />
+			<img src="/favicon.svg" alt="" width="34" height="34" class="rounded-tile" />
 			<span class="font-semibold tracking-[0.08em] uppercase">BotForge</span>
 			<span class="pill ml-2">First-run setup</span>
 		</div>
@@ -108,8 +108,8 @@
 			<div class="mt-8 grid gap-8 lg:grid-cols-[15rem_minmax(0,1fr)]">
 				<ol class="flex gap-2 overflow-x-auto lg:flex-col lg:gap-1" aria-label="Setup steps">
 					{#each steps as s, i (s)}
-						<li class="flex shrink-0 items-center gap-3 rounded-[10px] px-3 py-2 {i === step ? 'bg-panel font-medium' : 'text-muted'}" aria-current={i === step ? 'step' : undefined}>
-							<span class="grid size-6 place-items-center rounded-full font-mono text-[11px] {i < step ? 'bg-run text-white' : i === step ? 'bg-action text-white' : 'border border-rule'}">{#if i < step}<Icon name="check" size={12} />{:else}{i + 1}{/if}</span>
+						<li class="flex shrink-0 items-center gap-3 rounded-tile px-3 py-2 {i === step ? 'bg-panel font-medium' : 'text-muted'}" aria-current={i === step ? 'step' : undefined}>
+							<span class="grid size-6 place-items-center rounded-pill font-mono text-[11px] {i < step ? 'bg-run text-white' : i === step ? 'bg-action text-white' : 'border border-rule'}">{#if i < step}<Icon name="check" size={12} />{:else}{i + 1}{/if}</span>
 							{s}
 						</li>
 					{/each}
@@ -160,7 +160,7 @@
 								<label class="flex items-center gap-2 font-medium"><input type="checkbox" bind:checked={useGitHub} />Set up GitHub</label>
 							</div>
 							{#if useGitHub}
-								<div class="rounded-[12px] border border-rule-soft bg-paper p-4 sm:p-5">
+								<div class="rounded-overlay border border-rule-soft bg-paper p-4 sm:p-5">
 									<ProviderSetup provider="github" {publicUrl} bind:clientId={ghId} bind:secret={ghSecret} />
 								</div>
 							{/if}
@@ -174,7 +174,7 @@
 								<label class="flex items-center gap-2 font-medium"><input type="checkbox" bind:checked={useDiscord} />Set up Discord</label>
 							</div>
 							{#if useDiscord}
-								<div class="rounded-[12px] border border-rule-soft bg-paper p-4 sm:p-5">
+								<div class="rounded-overlay border border-rule-soft bg-paper p-4 sm:p-5">
 									<ProviderSetup provider="discord" {publicUrl} bind:clientId={dcId} bind:secret={dcSecret} />
 								</div>
 							{/if}
@@ -189,7 +189,7 @@
 								<p class="eyebrow">Ready</p>
 								<h2 class="mt-2 text-section">Review and finish</h2>
 							</div>
-							<dl class="grid max-w-2xl grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2 rounded-[12px] border border-rule-soft bg-paper p-4">
+							<dl class="grid max-w-2xl grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-2 rounded-overlay border border-rule-soft bg-paper p-4">
 								<dt class="text-muted">Administrator</dt><dd class="truncate">{email}</dd>
 								<dt class="text-muted">Panel address</dt><dd class="truncate font-mono text-small">{publicUrl}</dd>
 								<dt class="text-muted">GitHub</dt><dd>{useGitHub ? `Client ${ghId}` : 'Not now'}</dd>

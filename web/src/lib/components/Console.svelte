@@ -209,7 +209,7 @@
 
 <div class="flex flex-wrap items-center gap-2 border border-b-0 border-rule-soft bg-panel px-2 py-1.5">
 	<span class="inline-flex items-center gap-1.5 text-small font-medium {linkColor}" aria-live="polite">
-		<span class="size-2 rounded-full bg-current" aria-hidden="true"></span>{linkText}{#if paused}<span class="text-muted">, paused</span>{/if}
+		<span class="size-2 rounded-pill bg-current" aria-hidden="true"></span>{linkText}{#if paused}<span class="text-muted">, paused</span>{/if}
 	</span>
 	{#if dropped}<span class="text-small text-muted">{dropped} lines skipped</span>{/if}
 	<span class="flex-1"></span>

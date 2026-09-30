@@ -85,6 +85,9 @@ type Config struct {
 	// reverse proxy on the same host (X-Forwarded-For, CF-Connecting-IP). It is
 	// honored only for connections from loopback.
 	ProxyHeader string
+	// MetricsToken enables /metrics and authenticates Prometheus scrapes.
+	// Empty disables the endpoint.
+	MetricsToken string
 
 	// SFTPListen is the address of the embedded SFTP server; empty disables it.
 	SFTPListen  string
@@ -100,6 +103,30 @@ type Config struct {
 	// binding beyond 127.0.0.1 requires PortPublicBind.
 	PortMin, PortMax int
 	PortPublicBind   bool
+
+	// Static site hosting. SitesListen is a separate listener that only
+	// serves hosted sites (never the panel), so uploaded HTML and scripts
+	// never share the panel's origin; empty disables site hosting.
+	SitesListen string
+	// SitesBaseURL defines the default site address: a site with slug "docs"
+	// is served at <scheme>://docs.<host>[:port]. Point a wildcard DNS record
+	// (*.host) at the reverse proxy in front of SitesListen.
+	SitesBaseURL    string
+	SitesDir        string // releases, one directory per site
+	SiteMaxBytes    int64  // largest release (uncompressed)
+	MaxSitesPerUser int    // sites an account may create (0 = unlimited)
+	// SitesDNSTarget is the host name custom domains should CNAME to (shown in
+	// the domain instructions); defaults to the host of SitesBaseURL.
+	SitesDNSTarget string
+}
+
+// SitesDomain is the host part of SitesBaseURL ("" when unset).
+func (c Config) SitesDomain() string {
+	u, err := url.Parse(c.SitesBaseURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 // OAuthConfigured reports whether a provider ("github" or "discord") has credentials.
@@ -244,6 +271,7 @@ func Load(getenv func(string) string) (Config, error) {
 	c.DiscordClientID = strings.TrimSpace(getenv("BOTPANEL_DISCORD_CLIENT_ID"))
 	c.DiscordSecret = strings.TrimSpace(getenv("BOTPANEL_DISCORD_CLIENT_SECRET"))
 	c.ProxyHeader = strings.TrimSpace(getenv("BOTPANEL_PROXY_HEADER"))
+	c.MetricsToken = strings.TrimSpace(getenv("BOTPANEL_METRICS_TOKEN"))
 	if v := getenv("BOTPANEL_BACKUP_DIR"); v != "" {
 		c.BackupDir = v
 	}
@@ -279,6 +307,35 @@ func Load(getenv func(string) string) (Config, error) {
 		c.PortMin, c.PortMax = a, b
 	}
 	c.PortPublicBind = getenv("BOTPANEL_PORT_PUBLIC_BIND") == "1"
+	c.SitesDir, c.SiteMaxBytes, c.MaxSitesPerUser = "/var/lib/botpanel/sites", 100<<20, 10
+	if dev {
+		c.SitesDir = filepath.Join(".dev-data", "sites")
+		c.SitesListen, c.SitesBaseURL = "127.0.0.1:8081", "http://localhost:8081"
+	}
+	if v, ok := lookup(getenv, "BOTPANEL_SITES_LISTEN"); ok {
+		c.SitesListen = v
+	}
+	if v := strings.TrimRight(strings.TrimSpace(getenv("BOTPANEL_SITES_BASE_URL")), "/"); v != "" {
+		c.SitesBaseURL = v
+	}
+	if v := strings.TrimSpace(getenv("BOTPANEL_SITES_DIR")); v != "" {
+		c.SitesDir = v
+	}
+	c.SitesDNSTarget = strings.ToLower(strings.TrimSpace(getenv("BOTPANEL_SITES_DNS_TARGET")))
+	if v := getenv("BOTPANEL_SITE_MAX_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("BOTPANEL_SITE_MAX_BYTES: %w", err)
+		}
+		c.SiteMaxBytes = n
+	}
+	if v := getenv("BOTPANEL_MAX_SITES_PER_USER"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("BOTPANEL_MAX_SITES_PER_USER: %w", err)
+		}
+		c.MaxSitesPerUser = n
+	}
 	c.SFTPListen = strings.TrimSpace(getenv("BOTPANEL_SFTP_LISTEN"))
 	c.SFTPHostKey = strings.TrimSpace(getenv("BOTPANEL_SFTP_HOST_KEY"))
 	if c.SFTPHostKey == "" {
@@ -336,8 +393,60 @@ func Load(getenv func(string) string) (Config, error) {
 	return c, c.Validate()
 }
 
+// lookup distinguishes an explicitly empty variable (which may disable a
+// development default) from an unset one. getenv cannot, so the process
+// environment is consulted when getenv is os.Getenv's value.
+func lookup(getenv func(string) string, name string) (string, bool) {
+	if v := strings.TrimSpace(getenv(name)); v != "" {
+		return v, true
+	}
+	if v, ok := os.LookupEnv(name); ok && strings.TrimSpace(v) == "" && getenv(name) == v {
+		return "", true
+	}
+	return "", false
+}
+
 // LoadEnv loads configuration from the process environment.
 func LoadEnv() (Config, error) { return Load(os.Getenv) }
+
+func (c Config) validateSites() []error {
+	if c.SitesListen == "" {
+		return nil
+	}
+	var errs []error
+	if _, _, err := net.SplitHostPort(c.SitesListen); err != nil {
+		errs = append(errs, fmt.Errorf("sites listen address %q: %w", c.SitesListen, err))
+	} else if c.SitesListen == c.Listen {
+		errs = append(errs, errors.New("BOTPANEL_SITES_LISTEN must differ from BOTPANEL_LISTEN: sites never share the panel's listener"))
+	}
+	u, err := url.Parse(c.SitesBaseURL)
+	switch {
+	case c.SitesBaseURL == "":
+		errs = append(errs, errors.New("BOTPANEL_SITES_BASE_URL is required when BOTPANEL_SITES_LISTEN is set (for example https://sites.example.com)"))
+	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil:
+		errs = append(errs, fmt.Errorf("BOTPANEL_SITES_BASE_URL %q must be an origin such as https://sites.example.com", c.SitesBaseURL))
+	case c.PublicURL != "":
+		if p, err := url.Parse(c.PublicURL); err == nil {
+			ph, sh := strings.ToLower(p.Hostname()), strings.ToLower(u.Hostname())
+			// Sites are served on subdomains of sh: none of them may be the
+			// panel, and in production the panel must not be their parent
+			// (a site could then set cookies for the panel's host).
+			if strings.HasSuffix(ph, "."+sh) || (ph == sh && c.Production) {
+				errs = append(errs, errors.New("the panel's host must not be the sites domain or one of its subdomains; use a separate domain such as sites.example.com or example-sites.net"))
+			}
+		}
+	}
+	if c.SitesDir == "" || strings.ContainsRune(c.SitesDir, 0) {
+		errs = append(errs, errors.New("sites directory is empty or invalid"))
+	}
+	if c.SiteMaxBytes < 1<<20 || c.SiteMaxBytes > 4<<30 {
+		errs = append(errs, errors.New("BOTPANEL_SITE_MAX_BYTES must be between 1 MiB and 4 GiB"))
+	}
+	if c.MaxSitesPerUser < 0 {
+		errs = append(errs, errors.New("BOTPANEL_MAX_SITES_PER_USER cannot be negative (0 means unlimited)"))
+	}
+	return errs
+}
 
 // Validate checks the configuration for internal consistency.
 func (c Config) Validate() error {
@@ -412,6 +521,7 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("telemetry retention must be between 1h and 365d"))
 	}
 	errs = append(errs, c.validateOAuth()...)
+	errs = append(errs, c.validateSites()...)
 	if c.BackupDir == "" || strings.ContainsRune(c.BackupDir, 0) {
 		errs = append(errs, errors.New("backup directory is empty or invalid"))
 	}
@@ -437,6 +547,9 @@ func (c Config) Validate() error {
 	}
 	if c.ProxyHeader != "" && strings.Trim(c.ProxyHeader, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-") != "" {
 		errs = append(errs, errors.New("BOTPANEL_PROXY_HEADER must be a header name such as X-Forwarded-For"))
+	}
+	if c.MetricsToken != "" && len(c.MetricsToken) < 24 {
+		errs = append(errs, errors.New("BOTPANEL_METRICS_TOKEN must be at least 24 characters"))
 	}
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, errors.New("shutdown timeout must be positive"))

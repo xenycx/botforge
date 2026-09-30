@@ -60,6 +60,9 @@ func (db *DB) UseAccountInvite(ctx context.Context, hash []byte, u domain.User, 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (`+userCols+`) VALUES (?,?,?,?,?,?,?,?,?)`, u.ID, u.Email, u.DisplayName, u.AvatarJPEG, u.PasswordHash, u.Role, boolInt(u.Disabled), u.CreatedAtMS, u.UpdatedAtMS); err != nil {
 		return mapErr(err)
 	}
+	if err := createPersonalWorkspace(ctx, tx, u); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE account_invites SET used_by=?,used_at_ms=? WHERE token_hash=? AND used_at_ms IS NULL`, u.ID, nowMS, hash)
 	if err != nil {
 		return err

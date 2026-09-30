@@ -1,5 +1,9 @@
 # BotForge
 
+Current version: **0.2.0**. See [CHANGELOG.md](CHANGELOG.md) for release notes
+and [the implementation status](docs/implementation-status.md) for the staged
+platform-overhaul checklist.
+
 A lightweight hosting panel for Discord bots written in Node.js, Python, Rust,
 Go, Java or Ruby. Go + Fiber backend, SQLite, SvelteKit UI embedded in one
 static binary, Docker for isolation.
@@ -20,6 +24,14 @@ static binary, Docker for isolation.
 * Power controls incl. emergency kill, live CPU/RAM/disk gauges, per-bot
   auto-restart policy with backoff, startup/entrypoint editor, network and
   published-port controls
+* Team **workspaces** with owner/admin/developer/viewer roles on top of per-bot
+  sharing, and administrator views of every workspace, account and deployment
+  (`docs/workspaces.md`)
+* **Static site hosting** on a separate listener: ZIP or GitHub publishing,
+  instant rollback, custom domains with DNS verification, on-demand TLS via
+  the reverse proxy (`docs/sites.md`)
+* **Publish bots to GitHub**: create a repository from a bot's files and push
+  later changes, `.gitignore`-aware and never force-pushed
 * Sub-user sharing with granular permissions; embedded SFTP server with API keys
 * Visual package manager (npm, pip, Cargo, Go modules), per-bot backups with
   restore, bot-to-panel analytics API with discord.js / discord.py snippets,
@@ -67,8 +79,10 @@ Start at the [documentation index](docs/README.md). The project home is
 * `docs/isolation.md`: what containers get, the evidence, and **what is not provided**
 * `docs/backup.md`, `docs/deployment.md`, `docs/footprint.md`
 * `docs/features.md`: every panel feature, its limits and what it does not do
-* [docs/roadmap.md](docs/roadmap.md): proposed feature and user-experience roadmap, priorities and acceptance criteria
-* [docs/frontend-experience.md](docs/frontend-experience.md): visual direction, information architecture and page-by-page frontend plan
+* `docs/workspaces.md`: team workspaces, roles and administrator oversight
+* `docs/sites.md`: static site hosting, custom domains, DNS and reverse proxy setup
+* [CHANGELOG.md](CHANGELOG.md): versioned release history
+* [docs/implementation-status.md](docs/implementation-status.md): completed and remaining platform-overhaul work
 * `docs/oauth.md`: GitHub/Discord sign-in setup, Cloudflare, troubleshooting
 
 ## Validation (2026-09-30, Linux 7.2.5 x86_64, Go 1.27.1, Node 26.8.1)

@@ -171,7 +171,7 @@
 			</EmptyState>
 		</div>
 	{:else}
-		<WidgetGrid widgets={data.widgets ?? []} />
+		<WidgetGrid widgets={data.widgets ?? []} {botId} {canAdmin} onRemoved={load} />
 		<div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 			{#each visible as s (s.name)}
 				<div class="border border-rule-soft bg-panel p-3">

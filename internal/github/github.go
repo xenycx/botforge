@@ -8,6 +8,9 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,6 +55,7 @@ type Repo struct {
 	FullName      string `json:"full_name"`
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
+	HTMLURL       string `json:"html_url"`
 }
 
 func (c *Client) base() string {
@@ -307,4 +311,203 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// ---- writing: repository creation and pushing through the Git Data API ----
+//
+// Pushing never runs git on the host: file contents become blobs, a tree
+// lists them, a commit points at the tree and the branch ref moves to the
+// commit. That needs a token with the repo scope.
+
+// ErrConflict means the branch moved while a push was being prepared, or the
+// repository name is taken.
+var ErrConflict = errors.New("the repository changed or already exists")
+
+// Owner is an account a repository can be created under.
+type Owner struct {
+	Login string `json:"login"`
+	Org   bool   `json:"org"`
+}
+
+// Viewer returns the token owner's login.
+func (c *Client) Viewer(ctx context.Context, token string) (string, error) {
+	var o struct{ Login string }
+	if err := c.getJSON(ctx, "/user", token, &o); err != nil {
+		return "", err
+	}
+	return o.Login, nil
+}
+
+// Owners lists the user and the organizations they belong to (up to 100).
+func (c *Client) Owners(ctx context.Context, token string) ([]Owner, error) {
+	login, err := c.Viewer(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	out := []Owner{{Login: login}}
+	var orgs []struct{ Login string }
+	if err := c.getJSON(ctx, "/user/orgs?per_page=100", token, &orgs); err == nil {
+		for _, o := range orgs {
+			out = append(out, Owner{Login: o.Login, Org: true})
+		}
+	}
+	return out, nil
+}
+
+var repoNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+
+// ValidRepoName reports whether name is usable as a new repository name.
+func ValidRepoName(name string) bool {
+	return repoNameRe.MatchString(name) && name != "." && name != ".." && !strings.HasSuffix(strings.ToLower(name), ".git")
+}
+
+// CreateRepo creates a repository under the user (org "") or an
+// organization. auto_init gives it a first commit, which the Git Data API
+// needs (it cannot write to an empty repository).
+func (c *Client) CreateRepo(ctx context.Context, token, org, name, description string, private bool) (Repo, error) {
+	if !ValidRepoName(name) || (org != "" && !repoNameRe.MatchString(org)) {
+		return Repo{}, ErrInvalid
+	}
+	p := "/user/repos"
+	if org != "" {
+		p = "/orgs/" + org + "/repos"
+	}
+	res, err := c.do(ctx, http.MethodPost, p, token, map[string]any{
+		"name": name, "description": trunc(description, 350), "private": private, "auto_init": true,
+	})
+	if err != nil {
+		return Repo{}, err
+	}
+	defer res.Body.Close()
+	switch res.StatusCode {
+	case http.StatusCreated:
+	case http.StatusUnprocessableEntity:
+		return Repo{}, ErrConflict
+	default:
+		return Repo{}, statusErr(res)
+	}
+	var r Repo
+	return r, json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&r)
+}
+
+func (c *Client) postJSON(ctx context.Context, method, path, token string, body, out any, want int) error {
+	res, err := c.do(ctx, method, path, token, body)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != want {
+		if res.StatusCode == http.StatusUnprocessableEntity || res.StatusCode == http.StatusConflict {
+			return ErrConflict
+		}
+		return statusErr(res)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(out)
+}
+
+// BranchHead returns the commit a branch points at; ErrNotFound when the
+// branch does not exist.
+func (c *Client) BranchHead(ctx context.Context, token, fullName, branch string) (string, error) {
+	if !FullNameRe.MatchString(fullName) || !ValidBranch(branch) {
+		return "", ErrInvalid
+	}
+	var o struct {
+		Object struct{ SHA string } `json:"object"`
+	}
+	if err := c.getJSON(ctx, "/repos/"+fullName+"/git/ref/heads/"+branch, token, &o); err != nil {
+		return "", err
+	}
+	if !shaRe.MatchString(o.Object.SHA) {
+		return "", errors.New("github returned an invalid commit id")
+	}
+	return o.Object.SHA, nil
+}
+
+// TreeEntry is one file of a git tree.
+type TreeEntry struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"` // 100644, 100755 or 120000
+	Type string `json:"type"` // blob
+	SHA  string `json:"sha"`
+}
+
+// CommitFiles returns a commit's tree id and every file in it. Truncated
+// trees (very large repositories) are refused rather than pushed over
+// incompletely.
+func (c *Client) CommitFiles(ctx context.Context, token, fullName, commit string) (string, []TreeEntry, error) {
+	if !FullNameRe.MatchString(fullName) || !shaRe.MatchString(commit) {
+		return "", nil, ErrInvalid
+	}
+	var cm struct {
+		Tree struct{ SHA string } `json:"tree"`
+	}
+	if err := c.getJSON(ctx, "/repos/"+fullName+"/git/commits/"+commit, token, &cm); err != nil {
+		return "", nil, err
+	}
+	var t struct {
+		Tree      []TreeEntry `json:"tree"`
+		Truncated bool        `json:"truncated"`
+	}
+	if err := c.getJSON(ctx, "/repos/"+fullName+"/git/trees/"+cm.Tree.SHA+"?recursive=1", token, &t); err != nil {
+		return "", nil, err
+	}
+	if t.Truncated {
+		return "", nil, errors.New("the repository is too large to update through the GitHub API")
+	}
+	out := t.Tree[:0]
+	for _, e := range t.Tree {
+		if e.Type == "blob" {
+			out = append(out, e)
+		}
+	}
+	return cm.Tree.SHA, out, nil
+}
+
+// CreateBlob uploads file contents and returns the blob id.
+func (c *Client) CreateBlob(ctx context.Context, token, fullName string, content []byte) (string, error) {
+	var o struct{ SHA string }
+	err := c.postJSON(ctx, http.MethodPost, "/repos/"+fullName+"/git/blobs", token,
+		map[string]string{"content": base64.StdEncoding.EncodeToString(content), "encoding": "base64"}, &o, http.StatusCreated)
+	return o.SHA, err
+}
+
+// CreateTree writes a complete tree (no base tree: files not listed are
+// absent from it) and returns its id.
+func (c *Client) CreateTree(ctx context.Context, token, fullName string, entries []TreeEntry) (string, error) {
+	var o struct{ SHA string }
+	err := c.postJSON(ctx, http.MethodPost, "/repos/"+fullName+"/git/trees", token, map[string]any{"tree": entries}, &o, http.StatusCreated)
+	return o.SHA, err
+}
+
+// CreateCommit creates a commit and returns its id.
+func (c *Client) CreateCommit(ctx context.Context, token, fullName, message, tree string, parents []string) (string, error) {
+	var o struct{ SHA string }
+	err := c.postJSON(ctx, http.MethodPost, "/repos/"+fullName+"/git/commits", token,
+		map[string]any{"message": message, "tree": tree, "parents": parents}, &o, http.StatusCreated)
+	return o.SHA, err
+}
+
+// MoveBranch fast-forwards a branch to commit (never forced: a branch that
+// moved meanwhile returns ErrConflict), or creates it when create is set.
+func (c *Client) MoveBranch(ctx context.Context, token, fullName, branch, commit string, create bool) error {
+	if !FullNameRe.MatchString(fullName) || !ValidBranch(branch) || !shaRe.MatchString(commit) {
+		return ErrInvalid
+	}
+	if create {
+		return c.postJSON(ctx, http.MethodPost, "/repos/"+fullName+"/git/refs", token,
+			map[string]any{"ref": "refs/heads/" + branch, "sha": commit}, nil, http.StatusCreated)
+	}
+	return c.postJSON(ctx, http.MethodPatch, "/repos/"+fullName+"/git/refs/heads/"+branch, token,
+		map[string]any{"sha": commit, "force": false}, nil, http.StatusOK)
+}
+
+// BlobSHA is git's object id for file contents, so unchanged files need no upload.
+func BlobSHA(content []byte) string {
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(content))
+	h.Write(content)
+	return hex.EncodeToString(h.Sum(nil))
 }

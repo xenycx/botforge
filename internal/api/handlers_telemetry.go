@@ -43,12 +43,24 @@ func decodeTelemetry(b []byte) (service.TelemetryPayload, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
-		return p, domain.Invalid("invalid telemetry JSON: expected {stats, commands, events}")
+		return p, domain.Invalid("invalid telemetry JSON: expected {ready, identity, stats, commands, events, widgets, unpublish}")
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		return p, domain.Invalid("invalid telemetry JSON")
 	}
 	return p, nil
+}
+
+func (s *server) deleteBotWidget(c fiber.Ctx) error {
+	b, err := s.bots.Authorize(c.Context(), currentUser(c), strings.Clone(c.Params("id")), domain.PermFullAdmin)
+	if err != nil {
+		return err
+	}
+	key := strings.Clone(c.Params("key"))
+	if err := s.analytics.DeleteWidgets(c.Context(), b.ID, []string{key}); err != nil {
+		return err
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 // botTelemetryPost ingests one push over HTTP.

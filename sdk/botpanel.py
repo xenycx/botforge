@@ -39,6 +39,7 @@ class BotPanel:
         self._commands: Counter[str] = Counter()
         self._events: list[dict] = []
         self._widgets: dict[str, dict] = {}
+        self._unpublished: set[str] = set()
         self._task: asyncio.Task | None = None
 
     @property
@@ -63,10 +64,16 @@ class BotPanel:
         if len(self._events) < 10:
             self._events.append({"name": name, "data": data})
 
-    def widget(self, key: str, kind: str, title: str, data: dict, position: int = 0) -> None:
+    def widget(self, key: str, kind: str, title: str, data: dict, position: int = 0, *, group: str = "Overview", span: int = 1, min_height: int = 0, ttl_seconds: int = 0) -> None:
         """Publish a safe dashboard widget visible to every panel user."""
-        if len(self._widgets) < 24 or key in self._widgets:
-            self._widgets[key] = {"key": key, "kind": kind, "title": title, "position": position, "data": data}
+        if len(self._widgets) < 48 or key in self._widgets:
+            self._widgets[key] = {"key": key, "kind": kind, "title": title, "position": position, "group": group, "span": span, "min_height": min_height, "ttl_seconds": ttl_seconds, "data": data}
+        self._unpublished.discard(key)
+
+    def unpublish(self, key: str) -> None:
+        """Remove a previously published widget on the next push."""
+        self._widgets.pop(key, None)
+        self._unpublished.add(key)
 
     def stats(self) -> dict:
         bot = self.bot
@@ -88,10 +95,12 @@ class BotPanel:
         body = {
             # Each push is also a heartbeat: the panel can alert when they stop.
             "ready": self.bot.is_ready() and not self.bot.is_closed(),
+            "identity": ({"id": str(self.bot.user.id), "username": self.bot.user.name, "avatar_url": str(self.bot.user.display_avatar.url)} if self.bot.is_ready() and self.bot.user else None),
             "stats": self.stats(),
             "commands": [{"name": n, "count": c} for n, c in list(self._commands.items())[:20]],
             "events": self._events[:10],
-            "widgets": list(self._widgets.values())[:24],
+            "widgets": list(self._widgets.values())[:48],
+            "unpublish": list(self._unpublished)[:48],
         }
         self._commands.clear()
         del self._events[:10]
@@ -103,5 +112,7 @@ class BotPanel:
             ) as resp:
                 if resp.status >= 400:
                     log.warning("push failed: HTTP %s", resp.status)
+                else:
+                    self._unpublished.clear()
         except Exception as exc:  # never crash the bot
             log.warning("push failed: %s", exc)

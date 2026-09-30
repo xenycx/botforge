@@ -196,6 +196,24 @@ func (o *Operations) Activity(ctx context.Context, actor domain.User, active boo
 	return o.Store.ListOperations(ctx, f)
 }
 
+// ForWorkspace returns recent operations on a workspace's bots to any member
+// (administrators: any workspace).
+func (o *Operations) ForWorkspace(ctx context.Context, actor domain.User, workspaceID string, limit int) ([]domain.Operation, error) {
+	if _, err := o.Bots.workspaceRole(ctx, actor, workspaceID); err != nil {
+		return nil, err
+	}
+	return o.Store.ListOperations(ctx, sqlite.OperationFilter{WorkspaceID: workspaceID, Limit: limit})
+}
+
+// ForOwner returns recent operations on the bots an account owns
+// (administrators only).
+func (o *Operations) ForOwner(ctx context.Context, actor domain.User, ownerID string, limit int) ([]domain.Operation, error) {
+	if !actor.IsAdmin() {
+		return nil, domain.ErrForbidden
+	}
+	return o.Store.ListOperations(ctx, sqlite.OperationFilter{OwnerID: ownerID, Limit: limit})
+}
+
 // Get returns one operation of a bot.
 func (o *Operations) Get(ctx context.Context, actor domain.User, botID, id string) (domain.Operation, error) {
 	if _, err := o.Bots.Authorize(ctx, actor, botID, permAny); err != nil {

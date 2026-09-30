@@ -7,10 +7,11 @@
 	import { toast } from '$lib/ui/toast.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 
 	const meta: Record<Provider, { name: string; blurb: string }> = {
 		discord: { name: 'Discord', blurb: 'Connect to receive deployment notifications via Discord.' },
-		github: { name: 'GitHub', blurb: 'Connect to deploy from private repositories without re-prompting.' }
+		github: { name: 'GitHub', blurb: 'Connect to deploy from your repositories, and to create repositories from a bot’s code.' }
 	};
 
 	let connections = $state<Connection[]>([]);
@@ -73,27 +74,25 @@
 		c.linked
 			? c.provider === 'discord'
 				? `Connected as ${c.username}. Notifications ${c.notifications ? 'are on' : 'are off'}.`
-				: `Connected as ${c.username}. ${c.repo_access ? 'Private repositories and webhooks are enabled.' : 'Public repositories only.'}`
+				: `Connected as ${c.username}. ${c.repo_access ? 'Private repositories, webhooks and pushing code are enabled.' : 'Public repositories only; grant repository access to deploy private code or push to GitHub.'}`
 			: meta[c.provider].blurb;
 </script>
 
 <svelte:head><title>Connected accounts · BotForge</title></svelte:head>
 
-<h2 class="text-section">Connected accounts</h2>
-<p class="mt-1 max-w-prose text-muted">Sign in with GitHub or Discord instead of a password, deploy from your repositories, and receive notifications in Discord. Accounts are only linked from here, never matched by email address.</p>
-{#if notice}<Notice tone="success" class="mt-4" live>{notice}</Notice>{/if}
-{#if error}<Notice tone="fail" class="mt-4" live>{error}</Notice>{/if}
-
-<ul class="mt-5 divide-y divide-rule-soft border-y border-rule-soft bg-panel">
+<SettingsSection title="Connected accounts" description="Sign in with GitHub or Discord instead of a password, deploy from and push to your repositories, and receive notifications in Discord. Accounts are only linked from here, never matched by email address.">
+{#if notice}<Notice tone="success" class="mb-4" live>{notice}</Notice>{/if}
+{#if error}<Notice tone="fail" class="mb-4" live>{error}</Notice>{/if}
+<ul class="card divide-y divide-rule-soft overflow-hidden">
 	{#each connections as c (c.provider)}
 		<li class="flex flex-wrap items-center gap-4 px-4 py-4">
-			<span class="grid size-10 shrink-0 place-items-center rounded-control {c.provider === 'discord' ? 'bg-[#5865f2] text-white' : 'bg-ink text-paper'}" aria-hidden="true"><Icon name={c.provider} size={20} /></span>
+			<span class="grid size-10 shrink-0 place-items-center rounded-tile {c.provider === 'discord' ? 'bg-[#5865f2] text-white' : 'bg-ink text-paper'}" aria-hidden="true"><Icon name={c.provider} size={20} /></span>
 			<div class="min-w-0 flex-1 basis-56">
 				<p class="flex flex-wrap items-center gap-2">
 					<span class="font-semibold">{meta[c.provider].name}</span>
-					<span class="rounded-control px-1.5 py-px text-small font-medium {c.linked ? 'bg-run/12 text-run' : 'bg-paper-2 text-muted'}">{c.linked ? 'Linked' : c.configured ? 'Not linked' : 'Not set up on this panel'}</span>
+					<span class="pill" data-tone={c.linked ? 'run' : undefined}>{c.linked ? 'Linked' : c.configured ? 'Not linked' : 'Not set up on this panel'}</span>
 				</p>
-				<p class="text-muted">{c.configured ? description(c) : `The administrator has to configure ${meta[c.provider].name} sign-in first (docs/oauth.md).`}</p>
+				<p class="text-small text-muted">{c.configured ? description(c) : `The administrator has to configure ${meta[c.provider].name} sign-in first (docs/oauth.md).`}</p>
 			</div>
 			<div class="flex flex-wrap gap-2">
 				{#if c.linked && c.provider === 'discord' && !c.notifications}
@@ -113,4 +112,5 @@
 		{#if loaded}<li class="px-4 py-5 text-muted">No sign-in providers are available on this panel.</li>{/if}
 	{/each}
 </ul>
-<p class="mt-3 max-w-prose text-small text-muted">You always keep at least one way to sign in: Disconnect is unavailable for your only method. A password counts; add one under Security.</p>
+<p class="mt-3 text-small text-muted">You always keep at least one way to sign in: Disconnect is unavailable for your only method. A password counts; add one under <a class="link" href="/settings/security">Security</a>.</p>
+</SettingsSection>

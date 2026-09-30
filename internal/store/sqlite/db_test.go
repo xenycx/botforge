@@ -64,14 +64,15 @@ func TestMigrateIdempotentAndSchema(t *testing.T) {
 	}
 	var versions int
 	db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions)
-	if versions != 20 {
+	if versions != 26 {
 		t.Fatalf("versions = %d", versions)
 	}
 	var tables int
 	db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table'
 		AND name IN ('users','sessions','nodes','bots','bot_env_vars','node_telemetry',
-		'oauth_accounts','api_keys','bot_subusers','github_repos','bot_backups','bot_telemetry_logs','bot_ports')`).Scan(&tables)
-	if tables != 13 {
+		'oauth_accounts','api_keys','bot_subusers','github_repos','bot_backups','bot_telemetry_logs','bot_ports',
+		'workspaces','workspace_members','sites','site_releases','site_domains','operations')`).Scan(&tables)
+	if tables != 19 {
 		t.Fatalf("tables = %d", tables)
 	}
 }

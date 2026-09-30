@@ -6,6 +6,8 @@ services:
       - "127.0.0.1:8080:8080"
       # Uncomment when using the embedded SFTP server.
       # - "2022:2022"
+      # Uncomment for static site hosting (BOTPANEL_SITES_LISTEN=0.0.0.0:8081).
+      # - "127.0.0.1:8081:8081"
     env_file: .env
     volumes:
       - botforge-data:/var/lib/botpanel

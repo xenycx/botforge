@@ -125,12 +125,16 @@ func (db *DB) DeleteAPIKey(ctx context.Context, userID, id string) error {
 	return nil
 }
 
-// TransferBot makes newOwner the owner of a bot in one transaction. The new
+// TransferBot makes newOwner the owner of a bot in one transaction and moves
+// it into their personal workspace. The new
 // owner's own sub-user grant becomes redundant and is removed; the previous
 // owner optionally keeps full access as a sub-user. The GitHub link is
 // removed because its token belongs to the previous owner; it reports whether
 // one was removed.
 func (db *DB) TransferBot(ctx context.Context, botID, newOwner string, keepPrevious bool, nowMS int64) (hadRepo bool, err error) {
+	if _, err := db.PersonalWorkspace(ctx, newOwner); err != nil {
+		return false, err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -146,7 +150,10 @@ func (db *DB) TransferBot(ctx context.Context, botID, newOwner string, keepPrevi
 	if prev == newOwner {
 		return false, domain.Invalid("that account already owns the bot")
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE bots SET owner_id = ?, updated_at_ms = ? WHERE id = ?`, newOwner, nowMS, botID); err != nil {
+	// The bot moves into the new owner's personal workspace: staying in the
+	// previous owner's workspace would keep their access through membership.
+	if _, err := tx.ExecContext(ctx, `UPDATE bots SET owner_id = ?1, updated_at_ms = ?2,
+		workspace_id = (SELECT id FROM workspaces WHERE owner_id = ?1 AND personal = 1) WHERE id = ?3`, newOwner, nowMS, botID); err != nil {
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM bot_subusers WHERE bot_id = ? AND user_id = ?`, botID, newOwner); err != nil {

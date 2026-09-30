@@ -20,6 +20,7 @@ class BotPanel {
     this.commands = new Map();
     this.events = [];
     this.widgets = new Map();
+    this.unpublished = new Set();
     this.timer = null;
   }
 
@@ -44,10 +45,14 @@ class BotPanel {
     if (this.events.length < 10) this.events.push({ name, data });
   }
 
-  /** Publish a safe dashboard widget. Kinds: metric, status, progress, text, chart, table, link. */
-  widget(key, kind, title, data, position = 0) {
-    if (this.widgets.size < 24 || this.widgets.has(key)) this.widgets.set(key, { key, kind, title, position, data });
+  /** Publish a safe dashboard widget. options: group, span, minHeight, ttlSeconds. */
+  widget(key, kind, title, data, position = 0, options = {}) {
+    if (this.widgets.size < 48 || this.widgets.has(key)) this.widgets.set(key, { key, kind, title, position, group: options.group, span: options.span, min_height: options.minHeight, ttl_seconds: options.ttlSeconds, data });
+    this.unpublished.delete(key);
   }
+
+  /** Remove a previously published widget on the next push. */
+  unpublish(key) { this.widgets.delete(key); this.unpublished.add(key); }
 
   stats() {
     const c = this.client;
@@ -66,10 +71,12 @@ class BotPanel {
     const body = {
       // Each push is also a heartbeat: the panel can alert when they stop.
       ready: this.client.isReady(),
+      identity: this.client.isReady() && this.client.user ? { id: this.client.user.id, username: this.client.user.username, avatar_url: this.client.user.displayAvatarURL({ extension: 'png', size: 128 }) } : undefined,
       stats: this.stats(),
       commands: [...this.commands].slice(0, 20).map(([name, count]) => ({ name, count })),
       events: this.events.splice(0, 10),
-      widgets: [...this.widgets.values()].slice(0, 24),
+      widgets: [...this.widgets.values()].slice(0, 48),
+      unpublish: [...this.unpublished].slice(0, 48),
     };
     this.commands.clear();
     try {
@@ -80,6 +87,7 @@ class BotPanel {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) console.warn(`[botpanel] push failed: HTTP ${res.status}`);
+      else this.unpublished.clear();
     } catch (err) {
       console.warn('[botpanel] push failed:', err.message); // never crash the bot
     }

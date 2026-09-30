@@ -48,7 +48,7 @@ class BotPanel
   end
 
   def widget(key, kind, title, data, position: 0)
-    @lock.synchronize { @widgets[key] = { key: key, kind: kind, title: title, position: position, data: data } if @widgets.size < 24 || @widgets.key?(key) }
+    @lock.synchronize { @widgets[key] = { key: key, kind: kind, title: title, position: position, data: data } if @widgets.size < 48 || @widgets.key?(key) }
   end
 
   def flush
@@ -58,7 +58,7 @@ class BotPanel
       @commands.clear
       [c, e]
     end
-    body = { ready: @bot.connected?, stats: stats, commands: commands, events: events, widgets: @lock.synchronize { @widgets.values.first(24) } }
+    body = { ready: @bot.connected?, stats: stats, commands: commands, events: events, widgets: @lock.synchronize { @widgets.values.first(48) } }
     uri = URI("#{@url}/api/v1/bot-telemetry")
     Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 5) do |http|
       req = Net::HTTP::Post.new(uri, 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{@key}")

@@ -5,8 +5,10 @@
 	import { session } from '$lib/session.svelte';
 	import { confirmDialog } from '$lib/ui/dialogs.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 	import TwoStep from '$lib/components/TwoStep.svelte';
 
 	type Sess = { id: string; device: string; created_at_ms: number; last_seen_at_ms: number; expires_at_ms: number; current: boolean };
@@ -17,6 +19,9 @@
 	let confirm = $state('');
 	let pwError = $state('');
 	let saving = $state(false);
+	// The password form stays folded until it is wanted: most visits to this
+	// page are about sessions or two-step sign-in.
+	let pwOpen = $state(false);
 
 	async function load() {
 		try {
@@ -38,6 +43,7 @@
 			const had = session.hasPassword;
 			session.hasPassword = true;
 			current = next = confirm = '';
+			pwOpen = false;
 			toast(had ? 'Password changed. Your other sessions were signed out.' : 'Password added. Your other sessions were signed out.');
 			await load();
 		} catch (err) {
@@ -45,6 +51,10 @@
 		} finally {
 			saving = false;
 		}
+	}
+	function cancelPassword() {
+		pwOpen = false;
+		current = next = confirm = pwError = '';
 	}
 
 	async function revoke(s: Sess) {
@@ -69,51 +79,72 @@
 			toast(e instanceof ApiError ? e.message : 'Sessions could not be signed out.', 'fail');
 		}
 	}
+	const deviceIcon = (d: string) => (/curl|python|go-http|bot|automation/i.test(d) ? 'terminal' : 'monitor');
 </script>
 
 <svelte:head><title>Security · BotForge</title></svelte:head>
 
-<section aria-labelledby="pw-h" class="max-w-xl">
-	<h2 id="pw-h" class="text-section">{session.hasPassword ? 'Change password' : 'Add a password'}</h2>
-	<p class="mt-1 text-muted">
-		{#if session.hasPassword}Changing it signs out every other session. SFTP connections that use the password end too.{:else}You sign in with GitHub or Discord. A password lets you sign in without them and use SFTP with your password. For your protection this works within 10 minutes of signing in.{/if}
-	</p>
-	<form class="mt-4 grid gap-4" onsubmit={changePassword}>
-		{#if session.hasPassword}
-			<label class="block"><span class="label">Current password</span><input class="field" type="password" autocomplete="current-password" required bind:value={current} /></label>
+<SettingsSection
+	title="Password"
+	description={session.hasPassword
+		? 'Changing it signs out every other session. SFTP connections that use the password end too.'
+		: 'You sign in with GitHub or Discord. A password lets you sign in without them and use SFTP. For your protection this works within 10 minutes of signing in.'}
+>
+	<div class="card p-5">
+		{#if !pwOpen}
+			<div class="flex flex-wrap items-center gap-4">
+				<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 {session.hasPassword ? 'text-run' : 'text-muted'}"><Icon name="key" /></span>
+				<div class="min-w-0 flex-1">
+					<p class="font-medium">{session.hasPassword ? 'A password is set' : 'No password yet'}</p>
+					<p class="text-small text-muted">{session.hasPassword ? 'Use at least 12 characters; a few unrelated words work well.' : 'Add one to sign in without a provider.'}</p>
+				</div>
+				<button class="btn {session.hasPassword ? '' : 'btn-primary'}" onclick={() => (pwOpen = true)}>{session.hasPassword ? 'Change password' : 'Add a password'}</button>
+			</div>
+		{:else}
+			<form class="grid gap-4 @container" onsubmit={changePassword}>
+				{#if session.hasPassword}
+					<label class="block max-w-md"><span class="label">Current password</span><input class="field" type="password" autocomplete="current-password" required bind:value={current} /></label>
+				{/if}
+				<div class="grid gap-4 @lg:grid-cols-2">
+					<label class="block"><span class="label">New password</span><input class="field" type="password" autocomplete="new-password" required minlength="12" bind:value={next} /></label>
+					<label class="block"><span class="label">Repeat the new password</span><input class="field" type="password" autocomplete="new-password" required bind:value={confirm} /></label>
+				</div>
+				<p class="-mt-2 text-small text-muted">At least 12 characters. A few unrelated words work well.</p>
+				{#if pwError}<Notice tone="fail" live>{pwError}</Notice>{/if}
+				<div class="flex flex-wrap gap-2">
+					<button class="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : session.hasPassword ? 'Change password' : 'Add password'}</button>
+					<button type="button" class="btn btn-quiet" onclick={cancelPassword}>Cancel</button>
+				</div>
+			</form>
 		{/if}
-		<label class="block"><span class="label">New password</span><input class="field" type="password" autocomplete="new-password" required minlength="12" bind:value={next} /><span class="help">At least 12 characters. A few unrelated words work well.</span></label>
-		<label class="block"><span class="label">Repeat the new password</span><input class="field" type="password" autocomplete="new-password" required bind:value={confirm} /></label>
-		{#if pwError}<Notice tone="fail" live>{pwError}</Notice>{/if}
-		<div><button class="btn btn-primary" disabled={saving}>{session.hasPassword ? 'Change password' : 'Add password'}</button></div>
-	</form>
-</section>
-
-{#if session.features.mfa}<div class="mt-12"><TwoStep /></div>{/if}
-
-<section aria-labelledby="sess-h" class="mt-12">
-	<div class="flex flex-wrap items-end justify-between gap-2">
-		<div>
-			<h2 id="sess-h" class="text-section">Signed-in sessions</h2>
-			<p class="mt-1 text-muted">Browsers signed in to your account. Sign out any you do not recognize.</p>
-		</div>
-		{#if sessions && sessions.length > 1}<button class="btn" onclick={revokeOthers}>Sign out other sessions</button>{/if}
 	</div>
-	{#if error}<Notice tone="fail" class="mt-3">{error}</Notice>{/if}
+</SettingsSection>
+
+{#if session.features.mfa}<TwoStep />{/if}
+
+<SettingsSection title="Signed-in sessions" description="Browsers signed in to your account. Sign out any you do not recognize. At most 20 are kept; signing in again replaces the oldest.">
+	{#if error}<Notice tone="fail" class="mb-3">{error}</Notice>{/if}
 	{#if sessions === null && !error}
-		<div class="mt-3"><Skeleton rows={2} /></div>
+		<Skeleton rows={2} />
 	{:else if sessions}
-		<ul class="mt-3 divide-y divide-rule-soft border-y border-rule-soft bg-panel">
-			{#each sessions as s (s.id)}
-				<li class="flex flex-wrap items-center gap-3 px-3 py-3">
-					<div class="min-w-0 flex-1">
-						<p class="font-medium">{s.device || 'Unknown device'}{#if s.current}<span class="ml-2 text-small font-normal text-run">This browser</span>{/if}</p>
-						<p class="text-small text-muted">Signed in {fmtWhen(s.created_at_ms)}. Last active {fmtAgo(s.last_seen_at_ms)}. Expires {fmtWhen(s.expires_at_ms)}.</p>
-					</div>
-					{#if !s.current}<button class="btn btn-sm" onclick={() => revoke(s)}>Sign out</button>{/if}
-				</li>
-			{/each}
-		</ul>
-		<p class="mt-2 text-small text-muted">At most 20 sessions are kept; signing in again replaces the oldest.</p>
+		<div class="card overflow-hidden">
+			<ul class="divide-y divide-rule-soft">
+				{#each sessions as s (s.id)}
+					<li class="flex flex-wrap items-center gap-3 px-4 py-3">
+						<span class="grid size-9 shrink-0 place-items-center rounded-tile bg-paper-2 {s.current ? 'text-run' : 'text-muted'}"><Icon name={deviceIcon(s.device)} /></span>
+						<div class="min-w-0 flex-1 basis-56">
+							<p class="truncate font-medium">{s.device || 'Unknown device'}{#if s.current}<span class="pill ml-2 align-middle" data-tone="run">This browser</span>{/if}</p>
+							<p class="text-small text-muted">Active {fmtAgo(s.last_seen_at_ms)} · signed in {fmtWhen(s.created_at_ms)} · expires {fmtWhen(s.expires_at_ms)}</p>
+						</div>
+						{#if !s.current}<button class="btn btn-sm" onclick={() => revoke(s)}>Sign out</button>{/if}
+					</li>
+				{/each}
+			</ul>
+			{#if sessions.length > 1}
+				<div class="flex justify-end border-t border-rule-soft bg-paper/40 px-4 py-2.5">
+					<button class="btn btn-sm" onclick={revokeOthers}><Icon name="logout" size={14} />Sign out all other sessions</button>
+				</div>
+			{/if}
+		</div>
 	{/if}
-</section>
+</SettingsSection>

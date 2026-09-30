@@ -56,11 +56,13 @@ type Deps struct {
 	Tokens        *service.TokenService    // nil disables the automation API
 	Health        *service.HealthService   // nil disables application health and alert rules
 	Settings      *service.SettingsService // nil disables the setup wizard and panel settings
+	Sites         *service.SiteService     // nil (or not started) disables static site hosting
 	SetupCodeFile string                   // shown by the setup wizard
 	OnSetupDone   func()                   // called after the first administrator is created
 	Catalog       *runtimes.Catalog
 	SecureCookies bool   // Secure flag on the session cookie (production)
 	ProxyHeader   string // trusted client-IP header from a loopback reverse proxy; empty = none
+	MetricsToken  string // bearer token for /metrics; empty disables it
 
 	Nodes        NodeStore           // nil disables node/telemetry routes
 	Files        *filesystem.Manager // nil disables the file manager
@@ -111,6 +113,7 @@ type server struct {
 	tokens        *service.TokenService
 	health        *service.HealthService
 	settings      *service.SettingsService
+	sites         *service.SiteService
 	setupCodeFile string
 	onSetupDone   func()
 	statsLimit    *console.Limiter
@@ -150,7 +153,9 @@ func New(d Deps) *fiber.App {
 	}
 	app := fiber.New(cfg)
 
-	app.Use(securityHeaders, smallBody)
+	metrics := newPanelMetrics()
+	app.Use(securityHeaders, metrics.observe, smallBody)
+	app.Get("/metrics", metrics.handler(d))
 
 	v1 := app.Group("/api/v1")
 	v1.Get("/healthz", func(c fiber.Ctx) error {
@@ -179,7 +184,7 @@ func New(d Deps) *fiber.App {
 		return c.JSON(fiber.Map{"status": "ok", "checks": checks})
 	})
 	if d.Auth != nil && d.Bots != nil {
-		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
+		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, sites: d.Sites, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
 			console: d.Console, consoleLimit: d.ConsoleLimit, baseCtx: d.BaseCtx, nodes: d.Nodes, files: d.Files, maxUpload: d.MaxUpload,
 			runnerReady: d.RunnerReady, buildMemory: d.BuildMemory, diagnostics: d.Diagnostics}
 		if s.buildMemory == 0 {
@@ -209,14 +214,15 @@ func New(d Deps) *fiber.App {
 }
 
 // smallBody caps request bodies at 1 MiB (and rejects unknown-length bodies)
-// everywhere except the two streaming upload routes.
+// everywhere except the streaming upload routes.
 func smallBody(c fiber.Ctx) error {
 	if c.Method() == fiber.MethodGet || c.Method() == fiber.MethodHead {
 		return c.Next()
 	}
 	p := c.Path()
 	if (c.Method() == fiber.MethodPut && strings.HasSuffix(p, "/files/content")) ||
-		(c.Method() == fiber.MethodPost && strings.HasSuffix(p, "/files/extract")) {
+		(c.Method() == fiber.MethodPost && strings.HasSuffix(p, "/files/extract")) ||
+		(c.Method() == fiber.MethodPost && strings.HasPrefix(p, "/api/v1/sites/") && strings.HasSuffix(p, "/upload")) {
 		return c.Next()
 	}
 	switch n := c.RequestCtx().Request.Header.ContentLength(); {
@@ -328,6 +334,10 @@ func (s *server) routes(v1 fiber.Router) {
 		authed.Delete("/bots/:id/github", s.deleteGitHub)
 		authed.Post("/bots/:id/github/deploy", s.deployGitHub)
 		authed.Get("/bots/:id/github/preview", s.previewGitHub)
+		authed.Get("/me/github/owners", s.githubOwners)
+		authed.Get("/bots/:id/github/push-plan", s.pushPlan)
+		authed.Post("/bots/:id/github/publish", s.publishGitHub)
+		authed.Post("/bots/:id/github/push", s.pushGitHub)
 	}
 	if s.tokens != nil {
 		authed.Get("/me/tokens", s.listTokens)
@@ -365,6 +375,36 @@ func (s *server) routes(v1 fiber.Router) {
 	}
 	authed.Get("/auth/me", s.me)
 	authed.Get("/runtimes", s.listRuntimes)
+
+	authed.Get("/workspaces", s.listWorkspaces)
+	authed.Post("/workspaces", s.createWorkspace)
+	authed.Get("/workspaces/:wid", s.getWorkspace)
+	authed.Patch("/workspaces/:wid", s.patchWorkspace)
+	authed.Delete("/workspaces/:wid", s.deleteWorkspace)
+	authed.Put("/workspaces/:wid/members", s.addWorkspaceMember)
+	authed.Patch("/workspaces/:wid/members/:uid", s.patchWorkspaceMember)
+	authed.Delete("/workspaces/:wid/members/:uid", s.removeWorkspaceMember)
+	authed.Put("/bots/:id/workspace", s.moveBot)
+	authed.Get("/admin/workspaces", s.requireAdmin, s.adminListWorkspaces)
+	authed.Get("/admin/workspaces/:wid", s.requireAdmin, s.adminGetWorkspace)
+	authed.Get("/admin/users/:id", s.requireAdmin, s.adminGetUser)
+
+	authed.Get("/sites-info", s.sitesInfo)
+	if s.sites.Enabled() {
+		authed.Get("/sites", s.listSites)
+		authed.Post("/sites", s.createSite)
+		authed.Get("/sites/:sid", s.getSite)
+		authed.Patch("/sites/:sid", s.patchSite)
+		authed.Delete("/sites/:sid", s.deleteSite)
+		authed.Post("/sites/:sid/upload", s.uploadSite)
+		authed.Post("/sites/:sid/deploy", s.deploySite)
+		authed.Post("/sites/:sid/releases/:rid/activate", s.activateRelease)
+		authed.Post("/sites/:sid/domains", s.addSiteDomain)
+		authed.Post("/sites/:sid/domains/:domain/verify", s.verifySiteDomain)
+		authed.Delete("/sites/:sid/domains/:domain", s.removeSiteDomain)
+		authed.Get("/admin/sites", s.requireAdmin, s.adminListSites)
+		authed.Patch("/admin/sites/:sid", s.requireAdmin, s.adminPatchSite)
+	}
 
 	admin := authed.Group("/users", s.requireAdmin)
 	admin.Post("", s.createUser)
@@ -430,6 +470,7 @@ func (s *server) routes(v1 fiber.Router) {
 	if s.analytics != nil {
 		authed.Get("/sdk/:lang", s.sdkFile)
 		authed.Get("/bots/:id/analytics", s.botAnalytics)
+		authed.Delete("/bots/:id/widgets/:key", s.deleteBotWidget)
 		authed.Post("/bots/:id/telemetry-key", s.rotateTelemetryKey)
 		authed.Delete("/bots/:id/telemetry-key", s.revokeTelemetryKey)
 	}
@@ -450,6 +491,8 @@ func (s *server) routes(v1 fiber.Router) {
 	}
 	if s.health != nil {
 		authed.Get("/bots/:id/health", s.getHealth)
+		authed.Get("/bots/:id/health-probe", s.getHealthProbe)
+		authed.Put("/bots/:id/health-probe", s.putHealthProbe)
 		authed.Put("/bots/:id/alerts", s.putAlerts)
 		authed.Post("/bots/:id/alerts/test", s.testAlert)
 	}

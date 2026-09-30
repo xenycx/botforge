@@ -3,6 +3,15 @@
 // applies it before the first paint so the page never flashes the wrong theme.
 
 export type ThemePref = 'system' | 'light' | 'dark';
+export type Radius = (typeof radii)[number]['id'];
+
+/** Corner styles; the id is written to <html data-radius>. */
+export const radii = [
+	{ id: 'none', name: 'Square', text: 'No rounding anywhere' },
+	{ id: 'subtle', name: 'Subtle', text: 'Barely softened corners' },
+	{ id: 'default', name: 'Default', text: 'The BotForge look' },
+	{ id: 'round', name: 'Rounded', text: 'Soft, generous corners' }
+] as const;
 export type Accent = (typeof accents)[number]['id'];
 
 export const accents = [
@@ -22,6 +31,7 @@ export const accents = [
 
 const KEY = 'botpanel.theme';
 const ACCENT_KEY = 'botforge.accent';
+const RADIUS_KEY = 'botforge.radius';
 
 function read(): ThemePref {
 	try {
@@ -45,7 +55,17 @@ function readAccent(): Accent {
 	return 'ember';
 }
 
-export const theme = $state<{ pref: ThemePref; dark: boolean; accent: Accent }>({ pref: read(), dark: false, accent: readAccent() });
+function readRadius(): Radius {
+	try {
+		const value = localStorage.getItem(RADIUS_KEY);
+		if (radii.some((r) => r.id === value)) return value as Radius;
+	} catch {
+		/* storage unavailable: use the default corners */
+	}
+	return 'default';
+}
+
+export const theme = $state<{ pref: ThemePref; dark: boolean; accent: Accent; radius: Radius }>({ pref: read(), dark: false, accent: readAccent(), radius: readRadius() });
 
 function apply() {
 	const root = document.documentElement;
@@ -53,6 +73,7 @@ function apply() {
 	theme.dark = theme.pref === 'dark' || (theme.pref === 'system' && !!media?.matches);
 	root.setAttribute('data-theme', theme.dark ? 'dark' : 'light');
 	root.setAttribute('data-accent', theme.accent);
+	root.setAttribute('data-radius', theme.radius);
 	root.style.colorScheme = theme.dark ? 'dark' : 'light';
 }
 
@@ -71,6 +92,17 @@ export function setAccent(accent: Accent) {
 	theme.accent = accent;
 	try {
 		localStorage.setItem(ACCENT_KEY, accent);
+	} catch {
+		/* not persisted; still applied for this page */
+	}
+	apply();
+}
+
+export function setRadius(radius: Radius) {
+	theme.radius = radius;
+	try {
+		if (radius === 'default') localStorage.removeItem(RADIUS_KEY);
+		else localStorage.setItem(RADIUS_KEY, radius);
 	} catch {
 		/* not persisted; still applied for this page */
 	}

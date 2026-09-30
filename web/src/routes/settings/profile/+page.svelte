@@ -2,7 +2,9 @@
 	import { api, ApiError } from '$lib/api/client';
 	import { loadSession, session } from '$lib/session.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 
 	let name = $state(session.user?.display_name ?? '');
 	let avatar = $state<string | null>(null);
@@ -40,19 +42,23 @@
 </script>
 
 <svelte:head><title>Profile · BotForge</title></svelte:head>
-<h2 class="text-section">Profile</h2>
-<p class="mt-1 max-w-prose text-muted">Choose how your account appears around this panel. Your email remains the sign-in name.</p>
-{#if error}<Notice tone="fail" class="mt-4">{error}</Notice>{/if}
-<form class="mt-6 max-w-2xl border-y border-rule-soft bg-panel px-4 py-5 sm:px-6" onsubmit={save}>
-	<div class="flex flex-col gap-5 sm:flex-row sm:items-center">
-		{#if preview}<img src={preview} alt="Profile preview" class="size-24 rounded-full border border-rule object-cover" />{:else}<div class="grid size-24 place-items-center rounded-full bg-paper-2 text-section font-semibold text-muted">{(name || session.user?.email || '?').slice(0, 2).toUpperCase()}</div>{/if}
-		<div>
-			<label class="btn cursor-pointer">Choose picture<input class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onchange={choose} /></label>
-			{#if preview}<button type="button" class="btn ml-2" onclick={remove}>Remove</button>{/if}
-			<p class="mt-2 text-small text-muted">Cropped to a square and compressed to 128 × 128 pixels before upload.</p>
+<SettingsSection title="Profile" description="How your account appears around this panel: in sharing lists, activity and the header. Your email remains the sign-in name.">
+	{#if error}<Notice tone="fail" class="mb-4">{error}</Notice>{/if}
+	<form class="card grid gap-6 p-5 @container" onsubmit={save}>
+		<div class="flex flex-col gap-5 sm:flex-row sm:items-center">
+			{#if preview}<img src={preview} alt="Profile preview" class="size-20 rounded-pill border border-rule object-cover" />{:else}<div class="grid size-20 place-items-center rounded-pill bg-paper-2 text-section font-semibold text-muted">{(name || session.user?.email || '?').slice(0, 2).toUpperCase()}</div>{/if}
+			<div>
+				<div class="flex flex-wrap gap-2">
+					<label class="btn cursor-pointer"><Icon name="upload" size={14} />Choose picture<input class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" onchange={choose} /></label>
+					{#if preview}<button type="button" class="btn btn-quiet" onclick={remove}>Remove</button>{/if}
+				</div>
+				<p class="mt-2 text-small text-muted">Cropped to a square and compressed to 128 × 128 pixels before upload.</p>
+			</div>
 		</div>
-	</div>
-	<label class="mt-6 block max-w-md"><span class="label">Display name</span><input class="field" maxlength="64" bind:value={name} placeholder="How people should see you" /></label>
-	<label class="mt-4 block max-w-md"><span class="label">Email</span><input class="field" disabled value={session.user?.email ?? ''} /></label>
-	<div class="mt-5"><button class="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></div>
-</form>
+		<div class="grid gap-4 @xl:grid-cols-2">
+			<label class="block"><span class="label">Display name</span><input class="field" maxlength="64" bind:value={name} placeholder="How people should see you" /></label>
+			<label class="block"><span class="label">Email</span><input class="field" disabled value={session.user?.email ?? ''} /></label>
+		</div>
+		<div class="flex justify-end border-t border-rule-soft pt-4"><button class="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></div>
+	</form>
+</SettingsSection>

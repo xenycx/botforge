@@ -10,7 +10,10 @@ A single-page app embedded in the binary. Light and dark themes: the header
 button (sun/moon/monitor) cycles Light → Dark → Match the system, and the
 choice is remembered in the browser. Dark mode uses warm near-black surfaces
 with an ember accent; every colour comes from theme tokens, so the terminal and
-the code editor follow the theme too.
+the code editor follow the theme too. **Settings → Appearance** also offers
+twelve accent colours and four corner styles (Square, Subtle, Default,
+Rounded); Square removes rounding everywhere, including badges and avatars.
+These are per-browser preferences.
 
 - **Fleet** (`/`): search, filters for state, runtime and owner, tags and
   favourites (all kept in the URL), a summary of running / needs attention /
@@ -25,9 +28,17 @@ the code editor follow the theme too.
   Settings). Unsaved edits are protected when navigating away.
 - **Activity** (`/activity`): work (builds, deployments, backups, restores) and
   changes (who changed what; names only, never values).
-- **Settings**: connected accounts; Security (password, two-step sign-in,
-  sessions); SFTP keys and automation tokens.
-- **Administration**: users, host resources and capacity, diagnostics.
+- **Workspace switcher** (sidebar): scopes the overview, Sites and new bots to
+  one workspace or shows all of them (`workspaces.md`).
+- **Sites** (`/sites`): static websites with releases, rollback and custom
+  domains, when hosting is enabled (`sites.md`).
+- **Settings**: profile; appearance; workspaces and members; connected
+  accounts; Security (password, two-step sign-in, sessions); SFTP keys and
+  automation tokens. Each page explains a setting beside its controls on wide
+  screens and above them on narrow ones.
+- **Administration**: users (with each account's workspaces, bots and recent
+  deployments), workspaces, sites and domains (suspend/restore), host
+  resources and capacity, panel settings, diagnostics.
 
 ## Sharing and permissions (RBAC)
 
@@ -55,7 +66,13 @@ The token lives in the URL fragment, which browsers never send to the server.
 At most 20 open invitations per bot; they can be revoked.
 
 Ownership transfer removes the GitHub link (it uses the old owner's GitHub
-access). The last administrator cannot be removed or disabled.
+access) and moves the bot into the new owner's personal workspace. The last
+administrator cannot be removed or disabled.
+
+**Workspaces** grant access to every bot in them by role (owner, admin,
+developer, viewer) on top of these per-bot grants; see
+[workspaces.md](workspaces.md). Static websites are covered in
+[sites.md](sites.md).
 
 ## Lifecycle, power controls and resource gauges
 
@@ -153,6 +170,37 @@ A Stop, Delete or Unlink that arrives during a deployment wins.
 Auto-deploy uses a push webhook authenticated by HMAC-SHA256; unauthenticated
 deliveries always get the same `401`. Limits: no submodules or Git LFS.
 
+### Publishing a bot to GitHub
+
+The other direction also works: **Deploy → Publish to GitHub** creates a new
+repository (under your account or one of your organizations, private by
+default) from the bot's current files, pushes them as the first commit and
+links the bot to it, optionally with auto-deploy. For a linked bot, **Push to
+GitHub** commits the current files (for example after editing them in the
+panel or over SFTP) to the linked branch.
+
+* Pushing uses the **acting user's own** GitHub connection with repository
+  access (`repo` scope), never the token of whoever linked the repository, and
+  needs *Edit files* on the bot (publishing a new repository needs *Full
+  admin*).
+* Nothing runs on the host: files become blobs, a tree and a commit through
+  the GitHub Git Data API. Files GitHub already has are not uploaded again.
+* The push is never forced. If the branch moved on GitHub meanwhile, the push
+  stops with an explanation; deploy those changes first.
+* With a linked sub-folder, only that folder of the repository is replaced;
+  the rest of the repository stays.
+* What is sent: every file except those excluded by `.gitignore` files (root
+  and nested, with negation) and the built-in rules: `.git`, dependency and
+  cache folders (`node_modules`, `.venv`, `venv`, `__pycache__`, `target` at
+  the top, …), panel metadata, and `.env`/`.env.*` files (`.env.example`,
+  `.env.sample`, `.env.template` and `.env.dist` are kept). Environment
+  variables stored in the panel are never pushed. The dialog lists every file
+  before anything is created, so secrets in other files can be spotted.
+* Limits: 5,000 files, 200 MiB in total, 25 MiB per file (larger files are
+  skipped and listed). Each push is recorded as a *Push to GitHub* operation
+  in the deployment history; the pushed commit is recorded as deployed, and
+  its own webhook delivery does not redeploy the bot.
+
 ## Backups
 
 Manual and scheduled snapshots under `BOTPANEL_BACKUP_DIR` (mode 0600, SHA-256
@@ -196,6 +244,13 @@ repeated hours run once. One scheduler checks due rows every 30 seconds.
 separately from Docker's process state: every SDK push is a heartbeat and may
 say whether the bot is connected to Discord (`ready`). A bot that never reported
 is *unknown*, never *failed*.
+
+An optional TCP or HTTP probe checks one of the bot's published TCP ports
+through `127.0.0.1`. Intervals, timeouts, success/failure thresholds and startup
+grace are configurable. When enabled, the panel replaces the container once on
+an unhealthy transition; startup grace and transition-only restarts prevent a
+broken deployment from flapping continuously. Probe targets cannot name an
+arbitrary host, so this feature cannot be used for server-side request forgery.
 
 Per-bot Discord notification preferences: crashes, deployments, backup
 failures, recoveries, and an optional **heartbeat rule** that alerts once when a

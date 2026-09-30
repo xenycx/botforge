@@ -78,3 +78,46 @@ func TestApplicationHealthAndHeartbeatRule(t *testing.T) {
 	// Test notifications need a Discord webhook.
 	owner.mustStatus(400, "POST", base+"/alerts/test", nil)
 }
+
+func TestTCPHealthProbeValidationAndUnhealthyRestart(t *testing.T) {
+	e := newEnv(t)
+	clk := &atomicClock{}
+	clk.set(time.Unix(1_800_000_000, 0))
+	h := &service.HealthService{Store: e.db, Bots: e.bots, Now: clk.now}
+	e.app = New(Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), DB: e.db, Auth: e.auth, Bots: e.bots, Health: h, SecureCookies: true})
+	owner := e.user("probe-owner@x.io", domain.RoleUser)
+	viewer := e.user("probe-viewer@x.io", domain.RoleUser)
+	id := owner.createBot("probe")
+	base := "/api/v1/bots/" + id
+	owner.mustStatus(200, "PUT", base+"/users", map[string]any{"email": "probe-viewer@x.io", "permissions": domain.PermViewConsole})
+	var disabled healthProbeDTO
+	json.Unmarshal(viewer.mustStatus(200, "GET", base+"/health-probe", nil), &disabled)
+	if disabled.Status != "disabled" {
+		t.Fatalf("default probe: %+v", disabled)
+	}
+	input := map[string]any{"kind": "tcp", "host_port": 29999, "path": "/", "interval_s": 5, "timeout_ms": 250, "failure_threshold": 1, "success_threshold": 1, "startup_grace_s": 0, "restart_unhealthy": true}
+	viewer.mustStatus(403, "PUT", base+"/health-probe", input)
+	owner.mustStatus(400, "PUT", base+"/health-probe", input)
+	ctx := context.Background()
+	b, _ := e.db.GetBot(ctx, id)
+	if err := e.db.SetBotPorts(ctx, id, b.Generation, []domain.BotPort{{BotID: id, ContainerPort: 8080, HostPort: 29999, Protocol: "tcp", HostIP: "127.0.0.1"}}, clk.ms); err != nil {
+		t.Fatal(err)
+	}
+	owner.mustStatus(200, "PUT", base+"/health-probe", input)
+	b, _ = e.db.GetBot(ctx, id)
+	b, _, _ = e.db.SetDesired(ctx, id, domain.DesiredRunning, false, clk.ms)
+	e.db.Observe(ctx, sqlite.Observation{BotID: id, Generation: b.Generation, State: "running", SettleGeneration: true, NowMS: clk.ms})
+	before, _ := e.db.GetBot(ctx, id)
+	h.EvaluateProbes(ctx)
+	after, _ := e.db.GetBot(ctx, id)
+	var got healthProbeDTO
+	json.Unmarshal(viewer.mustStatus(200, "GET", base+"/health-probe", nil), &got)
+	if got.Status != "unhealthy" || got.ConsecutiveFailures != 1 || after.Generation != before.Generation+1 {
+		t.Fatalf("probe=%+v generation %d -> %d", got, before.Generation, after.Generation)
+	}
+	owner.mustStatus(200, "PUT", base+"/health-probe", map[string]any{"kind": ""})
+	json.Unmarshal(viewer.mustStatus(200, "GET", base+"/health-probe", nil), &got)
+	if got.Status != "disabled" {
+		t.Fatalf("disable: %+v", got)
+	}
+}

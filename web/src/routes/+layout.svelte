@@ -13,8 +13,10 @@
 	import Menu from '$lib/components/ui/Menu.svelte';
 	import OperationShelf from '$lib/components/OperationShelf.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
-	import { theme, cycleTheme, setTheme } from '$lib/ui/theme.svelte';
+	import { theme, cycleTheme } from '$lib/ui/theme.svelte';
 	import { describe } from '$lib/status';
+	import WorkspaceSwitcher from '$lib/components/WorkspaceSwitcher.svelte';
+	import { loadWorkspaces } from '$lib/workspaces.svelte';
 
 	let { children } = $props();
 	let drawer = $state(false);
@@ -30,7 +32,7 @@
 	let sidebarCollapsed = $state(readSidebarPreference());
 
 	// Pages that work without an account.
-	const PUBLIC = ['/', '/login', '/register', '/welcome', '/setup'];
+	const PUBLIC = ['/', '/login', '/register', '/welcome', '/setup', '/docs'];
 
 	onMount(async () => {
 		await loadSession();
@@ -93,7 +95,10 @@
 	}
 	afterNavigate(() => loadFavorites());
 	$effect(() => {
-		if (session.user) loadFavorites();
+		if (session.user) {
+			loadFavorites();
+			loadWorkspaces();
+		}
 	});
 
 	const path = $derived(page.url.pathname);
@@ -102,17 +107,18 @@
 	const nav = $derived<NavItem[]>([
 		{ href: '/dashboard', label: 'Overview', icon: 'home', active: path === '/dashboard' || (path.startsWith('/bots') && path !== '/bots/new') },
 		{ href: '/templates', label: 'Templates', icon: 'layers', active: path.startsWith('/templates') || path === '/bots/new' },
+		...(session.features.sites ? [{ href: '/sites', label: 'Sites', icon: 'globe' as IconName, active: path.startsWith('/sites') }] : []),
 		{ href: '/activity', label: 'Activity', icon: 'activity', active: path.startsWith('/activity') },
 		{ href: '/settings/connected-accounts', label: 'Settings', icon: 'gear', active: path.startsWith('/settings') },
 		...(isAdmin ? [{ href: '/admin/users', label: 'Administration', icon: 'shield' as IconName, active: path.startsWith('/admin') }] : [])
 	]);
 	const resources = $derived([
-		{ href: 'https://github.com/xenycx/botforge/tree/main/docs', label: 'Documentation', icon: 'book' as IconName, external: true },
+		{ href: '/docs', label: 'Documentation', icon: 'book' as IconName, external: false },
 		{ href: '/api/v1/automation/openapi.yaml', label: 'Automation API', icon: 'code' as IconName, external: true },
 		{ href: '/', label: 'What BotForge does', icon: 'info' as IconName, external: false },
 		...(isAdmin ? [{ href: '/admin/diagnostics', label: 'Status', icon: 'chart' as IconName, external: false }] : [])
 	]);
-	const bare = $derived(PUBLIC.includes(path) || (!session.user && session.loaded));
+	const bare = $derived((PUBLIC.includes(path) && path !== '/docs') || (!session.user && session.loaded));
 	const who = $derived(session.user?.display_name || session.user?.email.split('@')[0] || '');
 	const initials = $derived(who.slice(0, 2).toUpperCase());
 	const themeLabel = $derived(theme.pref === 'system' ? `System theme (${theme.dark ? 'dark' : 'light'})` : theme.pref === 'dark' ? 'Dark theme' : 'Light theme');
@@ -120,14 +126,7 @@
 		{ label: session.user?.email ?? '', disabled: true, onselect: () => {} },
 		'separator' as const,
 		{ label: 'Profile', onselect: () => goto('/settings/profile') },
-		{ label: 'Appearance', onselect: () => goto('/settings/appearance') },
-		{ label: 'Connected accounts', onselect: () => goto('/settings/connected-accounts') },
-		{ label: 'Security', onselect: () => goto('/settings/security') },
-		{ label: 'SFTP and API keys', onselect: () => goto('/settings/sftp') },
-		'separator' as const,
-		{ label: `${theme.pref === 'light' ? '✓ ' : ''}Light theme`, onselect: () => setTheme('light') },
-		{ label: `${theme.pref === 'dark' ? '✓ ' : ''}Dark theme`, onselect: () => setTheme('dark') },
-		{ label: `${theme.pref === 'system' ? '✓ ' : ''}Match the system`, onselect: () => setTheme('system') },
+		{ label: 'Settings', onselect: () => goto('/settings/appearance') },
 		'separator' as const,
 		{ label: 'Sign out', onselect: logout }
 	]);
@@ -139,7 +138,7 @@
 {#snippet sidebar(compact = false, collapsible = false)}
 	<div class="flex items-center {compact ? 'flex-col justify-center gap-2' : 'gap-2'} px-1">
 		<a href="/dashboard" class="flex min-w-0 items-center gap-2.5 {compact ? 'justify-center' : 'px-2'} py-1" aria-label="BotForge dashboard" title={compact ? 'BotForge dashboard' : undefined}>
-			<img src="/favicon.svg" alt="" width="30" height="30" class="shrink-0 rounded-[8px]" />
+			<img src="/favicon.svg" alt="" width="30" height="30" class="shrink-0 rounded-tile" />
 			{#if !compact}<span class="truncate font-semibold tracking-[0.08em] uppercase">BotForge</span>{/if}
 		</a>
 		{#if collapsible}
@@ -148,7 +147,8 @@
 			</button>
 		{/if}
 	</div>
-	<nav class="mt-6" aria-label="Main">
+	<div class="mt-5 {compact ? 'flex justify-center' : 'px-1'}"><WorkspaceSwitcher {compact} /></div>
+	<nav class="mt-4" aria-label="Main">
 		<ul class="grid gap-0.5">
 			{#each nav as n (n.href)}
 				<li>
@@ -167,7 +167,7 @@
 				{@const d = describe(b)}
 				<li>
 					<a href="/bots/{b.id}" class="side-link {compact ? 'justify-center px-0' : ''}" data-active={path === `/bots/${b.id}`} aria-label={compact ? b.name : undefined} title={compact ? b.name : undefined}>
-						<span class="side-dot" data-tone={d.tone}></span>{#if !compact}<span class="truncate">{b.name}</span>{/if}
+						{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-6 shrink-0 rounded-pill object-cover" referrerpolicy="no-referrer" />{:else}<span class="side-dot" data-tone={d.tone}></span>{/if}{#if !compact}<span class="truncate">{b.name}</span>{/if}
 					</a>
 				</li>
 			{:else}
@@ -201,7 +201,7 @@
 			<header class="topbar sticky top-0 z-30 border-b border-rule-soft backdrop-blur-md">
 				<div class="flex h-16 items-center gap-2 px-4 sm:px-6 lg:px-10">
 					<button class="btn btn-quiet btn-icon lg:hidden" aria-label="Open menu" aria-expanded={drawer} onclick={() => (drawer = true)}><Icon name="menu" size={18} /></button>
-					<a href="/dashboard" class="flex items-center gap-2 lg:hidden" aria-label="BotForge dashboard"><img src="/favicon.svg" alt="" width="26" height="26" class="rounded-[7px]" /></a>
+					<a href="/dashboard" class="flex items-center gap-2 lg:hidden" aria-label="BotForge dashboard"><img src="/favicon.svg" alt="" width="26" height="26" class="rounded-tile" /></a>
 					<p class="hidden truncate text-title text-muted sm:block">Welcome back, <span class="font-semibold text-ink">{who}</span></p>
 					<div class="ml-auto flex items-center gap-1.5">
 						<button class="tb-btn" onclick={() => (palette = true)} aria-label="Go to a bot or page (Ctrl+K)" title="Go to (Ctrl+K)"><Icon name="search" size={17} /></button>

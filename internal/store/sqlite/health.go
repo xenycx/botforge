@@ -107,3 +107,55 @@ func (db *DB) HeartbeatWatches(ctx context.Context) ([]domain.HeartbeatWatch, er
 	}
 	return out, nil
 }
+
+func scanHealthProbe(row interface{ Scan(...any) error }) (domain.HealthProbe, error) {
+	var p domain.HealthProbe
+	var restart int
+	err := row.Scan(&p.BotID, &p.Kind, &p.HostPort, &p.Path, &p.IntervalSeconds, &p.TimeoutMS,
+		&p.FailureThreshold, &p.SuccessThreshold, &p.StartupGraceSeconds, &restart, &p.Status,
+		&p.ConsecutiveFailures, &p.ConsecutiveSuccesses, &p.LastCheckedAtMS, &p.LastError, &p.UpdatedAtMS)
+	p.RestartUnhealthy = restart == 1
+	return p, mapErr(err)
+}
+
+const healthProbeCols = `bot_id,kind,host_port,path,interval_s,timeout_ms,failure_threshold,success_threshold,startup_grace_s,restart_unhealthy,status,consecutive_failures,consecutive_successes,last_checked_at_ms,last_error,updated_at_ms`
+
+func (db *DB) GetHealthProbe(ctx context.Context, botID string) (domain.HealthProbe, error) {
+	return scanHealthProbe(db.QueryRowContext(ctx, `SELECT `+healthProbeCols+` FROM bot_health_probes WHERE bot_id=?`, botID))
+}
+
+func (db *DB) ListHealthProbes(ctx context.Context) ([]domain.HealthProbe, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+healthProbeCols+` FROM bot_health_probes ORDER BY bot_id LIMIT 5000`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.HealthProbe
+	for rows.Next() {
+		p, err := scanHealthProbe(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) SetHealthProbe(ctx context.Context, p domain.HealthProbe) error {
+	_, err := db.ExecContext(ctx, `INSERT INTO bot_health_probes (bot_id,kind,host_port,path,interval_s,timeout_ms,failure_threshold,success_threshold,startup_grace_s,restart_unhealthy,updated_at_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(bot_id) DO UPDATE SET kind=excluded.kind,host_port=excluded.host_port,path=excluded.path,interval_s=excluded.interval_s,timeout_ms=excluded.timeout_ms,failure_threshold=excluded.failure_threshold,success_threshold=excluded.success_threshold,startup_grace_s=excluded.startup_grace_s,restart_unhealthy=excluded.restart_unhealthy,status='unknown',consecutive_failures=0,consecutive_successes=0,last_checked_at_ms=NULL,last_error=NULL,updated_at_ms=excluded.updated_at_ms`, p.BotID, p.Kind, p.HostPort, p.Path, p.IntervalSeconds, p.TimeoutMS, p.FailureThreshold, p.SuccessThreshold, p.StartupGraceSeconds, boolInt(p.RestartUnhealthy), p.UpdatedAtMS)
+	return mapErr(err)
+}
+
+func (db *DB) DeleteHealthProbe(ctx context.Context, botID string) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM bot_health_probes WHERE bot_id=?`, botID)
+	return err
+}
+
+func (db *DB) RecordHealthProbe(ctx context.Context, p domain.HealthProbe) (bool, error) {
+	res, err := db.ExecContext(ctx, `UPDATE bot_health_probes SET status=?,consecutive_failures=?,consecutive_successes=?,last_checked_at_ms=?,last_error=? WHERE bot_id=? AND updated_at_ms=?`, p.Status, p.ConsecutiveFailures, p.ConsecutiveSuccesses, p.LastCheckedAtMS, p.LastError, p.BotID, p.UpdatedAtMS)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}

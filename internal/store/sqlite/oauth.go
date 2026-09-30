@@ -131,6 +131,9 @@ func (db *DB) CreateUserWithOAuth(ctx context.Context, u domain.User, a domain.O
 		a.TokenCipher, a.TokenNonce, a.TokenKeyID, boolInt(a.NotifyEnabled), a.CreatedAtMS, a.UpdatedAtMS); err != nil {
 		return mapErr(err)
 	}
+	if err := createPersonalWorkspace(ctx, tx, u); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

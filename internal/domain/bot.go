@@ -10,6 +10,7 @@ const (
 type Bot struct {
 	ID                 string
 	OwnerID            string
+	WorkspaceID        string
 	NodeID             string
 	Name               string
 	Runtime            string
@@ -28,6 +29,9 @@ type Bot struct {
 	ObservedAtMS       *int64
 	CreatedAtMS        int64
 	UpdatedAtMS        int64
+	DiscordUserID      string
+	DiscordUsername    string
+	DiscordAvatarURL   string
 
 	// Startup. When Entrypoint is set it is the container entrypoint (its first
 	// element must be a permitted command) and Argv are its arguments; otherwise

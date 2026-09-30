@@ -67,10 +67,13 @@ func TestBotTelemetryEndToEnd(t *testing.T) {
 		t.Fatal("only the hash may be stored")
 	}
 
-	push := `{"stats":{"guilds":12,"members":3400,"ping":42.5},"commands":[{"name":"ban"},{"name":"ban","count":2},{"name":"help"}],"events":[{"name":"guild_join","data":{"id":"1"}}],"widgets":[{"key":"gateway","kind":"status","title":"Gateway","position":1,"data":{"state":"good","text":"Connected"}}]}`
+	push := `{"ready":true,"identity":{"id":"123456789012345678","username":"Example Bot","avatar_url":"https://cdn.discordapp.com/avatars/123456789012345678/abc.png"},"stats":{"guilds":12,"members":3400,"ping":42.5},"commands":[{"name":"ban"},{"name":"ban","count":2},{"name":"help"}],"events":[{"name":"guild_join","data":{"id":"1"}}],"widgets":[{"key":"gateway","kind":"status","title":"Gateway","position":1,"data":{"state":"good","text":"Connected"}}]}`
 	resp, body := anon.bearer("POST", "/api/v1/bot-telemetry", k.Key, push)
 	if resp.StatusCode != 202 || !strings.Contains(string(body), `"stored":8`) {
 		t.Fatalf("push: %d %s", resp.StatusCode, body)
+	}
+	if got := string(owner.mustStatus(200, "GET", bot, nil)); !strings.Contains(got, `"discord_avatar_url":"https://cdn.discordapp.com/avatars/123456789012345678/abc.png"`) {
+		t.Fatalf("Discord identity was not attached to bot: %s", got)
 	}
 	// Repeat stat samples inside the minimum interval are dropped, commands are not.
 	_, body = anon.bearer("POST", "/api/v1/bot-telemetry", k.Key, push)
@@ -101,20 +104,36 @@ func TestBotTelemetryEndToEnd(t *testing.T) {
 	if len(rep.Widgets) != 1 || rep.Widgets[0].Key != "gateway" || rep.Widgets[0].Kind != "status" {
 		t.Fatalf("widgets: %+v", rep.Widgets)
 	}
+	// Widgets have a complete lifecycle: the bot can unpublish, and a full bot
+	// administrator can remove a stuck widget without deleting the bot.
+	if resp, body := anon.bearer("POST", "/api/v1/bot-telemetry", k.Key, `{"unpublish":["gateway"]}`); resp.StatusCode != 202 || !strings.Contains(string(body), `"stored":1`) {
+		t.Fatalf("unpublish: %d %s", resp.StatusCode, body)
+	}
+	json.Unmarshal(viewer.mustStatus(200, "GET", bot+"/analytics?window=1h", nil), &rep)
+	if len(rep.Widgets) != 0 {
+		t.Fatalf("widget was not unpublished: %+v", rep.Widgets)
+	}
+	anon.bearer("POST", "/api/v1/bot-telemetry", k.Key, `{"widgets":[{"key":"gateway","kind":"status","title":"Gateway","group":"Ops","span":2,"ttl_seconds":120,"data":{"state":"good","text":"Connected"}}]}`)
+	owner.mustStatus(204, "DELETE", bot+"/widgets/gateway", nil)
+	json.Unmarshal(viewer.mustStatus(200, "GET", bot+"/analytics?window=1h", nil), &rep)
+	if len(rep.Widgets) != 0 {
+		t.Fatalf("widget was not deleted: %+v", rep.Widgets)
+	}
 	viewer.mustStatus(400, "GET", bot+"/analytics?window=1y", nil)
 	e.user("stranger@x.io", domain.RoleUser).mustStatus(404, "GET", bot+"/analytics", nil)
 
 	// Validation: bad names, NaN-ish values, oversize events, unknown fields.
 	for name, bad := range map[string]string{
-		"bad stat name":  `{"stats":{"a/b":1}}`,
-		"huge value":     `{"stats":{"x":1e30}}`,
-		"bad command":    `{"commands":[{"name":""}]}`,
-		"zero count":     `{"commands":[{"name":"x","count":0}]}`,
-		"big event":      `{"events":[{"name":"e","data":"` + strings.Repeat("a", 2000) + `"}]}`,
-		"unknown field":  `{"nope":1}`,
-		"not json":       `hello`,
-		"too many stats": `{"stats":{"a":1,"b":1,"c":1,"d":1,"e":1,"f":1,"g":1,"h":1,"i":1,"j":1,"k":1,"l":1,"m":1,"n":1,"o":1,"p":1,"q":1}}`,
-		"bad widget":     `{"widgets":[{"key":"x","kind":"html","title":"Unsafe","data":{"html":"<script>"}}]}`,
+		"bad stat name":   `{"stats":{"a/b":1}}`,
+		"huge value":      `{"stats":{"x":1e30}}`,
+		"bad command":     `{"commands":[{"name":""}]}`,
+		"zero count":      `{"commands":[{"name":"x","count":0}]}`,
+		"big event":       `{"events":[{"name":"e","data":"` + strings.Repeat("a", 2000) + `"}]}`,
+		"unknown field":   `{"nope":1}`,
+		"not json":        `hello`,
+		"too many stats":  `{"stats":{"a":1,"b":1,"c":1,"d":1,"e":1,"f":1,"g":1,"h":1,"i":1,"j":1,"k":1,"l":1,"m":1,"n":1,"o":1,"p":1,"q":1}}`,
+		"bad widget":      `{"widgets":[{"key":"x","kind":"html","title":"Unsafe","data":{"html":"<script>"}}]}`,
+		"bad widget data": `{"widgets":[{"key":"x","kind":"metric","title":"Metric","data":{"value":"not a number"}}]}`,
 	} {
 		if resp, _ := anon.bearer("POST", "/api/v1/bot-telemetry", k.Key, bad); resp.StatusCode != 400 {
 			t.Errorf("%s: status %d", name, resp.StatusCode)

@@ -52,8 +52,10 @@ function freePort() {
 // ---- throwaway panel ----
 const dir = mkdtempSync(join(tmpdir(), 'botpanel-e2e-'));
 const port = await freePort();
+const sitesPort = await freePort();
 const base = `http://127.0.0.1:${port}`;
-const env = { ...process.env, BOTPANEL_ENV: 'development', BOTPANEL_LISTEN: `127.0.0.1:${port}`, BOTPANEL_RUNNER_MODE: 'none', BOTPANEL_BACKUP_INTERVAL: '0' };
+const env = { ...process.env, BOTPANEL_ENV: 'development', BOTPANEL_LISTEN: `127.0.0.1:${port}`, BOTPANEL_RUNNER_MODE: 'none', BOTPANEL_BACKUP_INTERVAL: '0',
+	BOTPANEL_SITES_LISTEN: `127.0.0.1:${sitesPort}`, BOTPANEL_SITES_BASE_URL: `http://localhost:${sitesPort}` };
 const adminPw = randomBytes(12).toString('base64url');
 const userPw = randomBytes(12).toString('base64url');
 execFileSync(BIN, ['create-admin', 'admin@e2e.test'], { cwd: dir, env: { ...env, BOTPANEL_ADMIN_PASSWORD: adminPw }, stdio: 'ignore' });
@@ -151,6 +153,21 @@ await step('appearance accents use tuned light and dark colors', async () => {
 	expect((await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--color-action').trim())) === '#6f9cff', 'dark Ocean accent is wrong');
 	await page.getByRole('button', { name: /Light/ }).click();
 	expect((await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--color-action').trim())) === '#2458d3', 'light Ocean accent is wrong');
+	await page.goto('/dashboard');
+});
+
+await step('the square corner style removes rounding everywhere and is remembered', async () => {
+	await page.goto('/settings/appearance');
+	await page.getByRole('button', { name: /^Square/ }).click();
+	const radius = () => page.evaluate(() => getComputedStyle(document.querySelector('.btn')).borderTopLeftRadius);
+	expect((await page.getAttribute('html', 'data-radius')) === 'none', 'data-radius is not none');
+	expect((await radius()) === '0px', `button radius ${await radius()}`);
+	await page.reload();
+	expect((await page.getAttribute('html', 'data-radius')) === 'none', 'the corner style was not remembered');
+	await page.getByRole('button', { name: /^Rounded/ }).click();
+	expect((await radius()) === '9px', `rounded button radius ${await radius()}`);
+	await page.getByRole('button', { name: /^Default/ }).click();
+	expect((await radius()) === '6px', `default button radius ${await radius()}`);
 	await page.goto('/dashboard');
 });
 
@@ -271,6 +288,16 @@ await step('the Changes view lists who changed what, without values', async () =
 	expect(!(await page.content()).includes('placeholder-token-for-tests'), 'a secret value is on the page');
 });
 
+await step('the workspace switcher scopes the overview', async () => {
+	const ws = await admin('POST', '/workspaces', { name: 'E2E team' });
+	await page.goto('/dashboard');
+	await page.getByRole('button', { name: 'Switch workspace' }).first().click();
+	await page.getByRole('menuitem', { name: /E2E team/ }).click();
+	await page.getByRole('heading', { name: /No bots in E2E team yet/ }).waitFor();
+	expect((await page.evaluate(() => localStorage.getItem('botforge.workspace'))) === ws.workspace.id, 'the selection was not remembered');
+	await page.getByRole('button', { name: 'Show all workspaces' }).click();
+});
+
 await step('tags filter the fleet and favorites come first', async () => {
 	await admin('POST', '/bots', { name: 'zz second', runtime: 'python' });
 	await admin('PUT', `/bots/${botId}/tags`, { tags: ['music'] });
@@ -286,7 +313,7 @@ await step('tags filter the fleet and favorites come first', async () => {
 });
 
 // Visual review at three sizes and page-wide overflow checks.
-const pages = ['/', '/register', '/dashboard', '/bots/new', `/bots/${botId}?tab=overview`, `/bots/${botId}?tab=console`, `/bots/${botId}?tab=files`, `/bots/${botId}?tab=env`, `/bots/${botId}?tab=analytics`, `/bots/${botId}?tab=backups`, `/bots/${botId}?tab=deploy`, `/bots/${botId}?tab=schedules`, `/bots/${botId}?tab=alerts`, `/bots/${botId}?tab=users`, '/activity', '/settings/profile', '/settings/appearance', '/settings/security', '/settings/sftp', '/admin/users', '/admin/settings', '/admin/host', '/admin/diagnostics'];
+const pages = ['/', '/register', '/dashboard', '/bots/new', `/bots/${botId}?tab=overview`, `/bots/${botId}?tab=console`, `/bots/${botId}?tab=files`, `/bots/${botId}?tab=env`, `/bots/${botId}?tab=analytics`, `/bots/${botId}?tab=backups`, `/bots/${botId}?tab=deploy`, `/bots/${botId}?tab=schedules`, `/bots/${botId}?tab=alerts`, `/bots/${botId}?tab=users`, '/activity', '/sites', '/settings/profile', '/settings/appearance', '/settings/workspaces', '/settings/connected-accounts', '/settings/security', '/settings/sftp', '/admin/users', '/admin/workspaces', '/admin/sites', '/admin/settings', '/admin/host', '/admin/diagnostics'];
 for (const [label, vp] of [['phone', { width: 375, height: 812 }], ['tablet', { width: 768, height: 1024 }], ['desktop', { width: 1440, height: 900 }]]) {
 	const p = await newPage(vp);
 	await signIn(p, 'admin@e2e.test', adminPw);

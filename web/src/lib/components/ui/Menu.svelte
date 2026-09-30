@@ -15,8 +15,23 @@
 		text = '',
 		align = 'end',
 		class: cls = '',
+		triggerClass = '',
+		menuClass = '',
+		fixed = false,
 		trigger
-	}: { items: MenuItem[]; label: string; icon?: IconName; text?: string; align?: 'start' | 'end'; class?: string; trigger?: Snippet } = $props();
+	}: {
+		items: MenuItem[];
+		label: string;
+		icon?: IconName;
+		text?: string;
+		align?: 'start' | 'end';
+		class?: string;
+		triggerClass?: string;
+		menuClass?: string;
+		/** Position against the viewport, for triggers inside narrow scrolling containers that would clip the list. */
+		fixed?: boolean;
+		trigger?: Snippet;
+	} = $props();
 
 	let open = $state(false);
 	let btn: HTMLButtonElement | undefined = $state();
@@ -30,7 +45,12 @@
 		const n = delta === 'first' ? 0 : delta === 'last' ? els.length - 1 : (i + delta + els.length) % els.length;
 		els[n].focus();
 	}
+	let at = $state('');
 	async function show() {
+		if (fixed && btn) {
+			const r = btn.getBoundingClientRect();
+			at = `position: fixed; top: ${Math.round(r.bottom + 4)}px; left: ${Math.round(align === 'end' ? r.right : r.left)}px;${align === 'end' ? ' transform: translateX(-100%);' : ''}`;
+		}
 		open = true;
 		await Promise.resolve();
 		focusItem('first');
@@ -67,7 +87,7 @@
 <div class="relative inline-block {cls}">
 	<button
 		bind:this={btn}
-		class={trigger ? 'flex items-center gap-1.5 rounded-full p-0.5 pr-1.5 hover:bg-paper-2/60' : `btn ${text ? '' : 'btn-icon'} btn-quiet`}
+		class={triggerClass || (trigger ? 'flex items-center gap-1.5 rounded-pill p-0.5 pr-1.5 hover:bg-paper-2/60' : `btn ${text ? '' : 'btn-icon'} btn-quiet`)}
 		aria-haspopup="menu"
 		aria-expanded={open}
 		aria-controls="menu-{uid}"
@@ -89,7 +109,8 @@
 			role="menu"
 			tabindex="-1"
 			aria-label={label}
-			class="absolute top-full z-40 mt-1 min-w-48 animate-enter rounded-overlay border border-rule-soft bg-raised py-1 shadow-overlay {align === 'end' ? 'right-0' : 'left-0'}"
+			class="{fixed ? 'z-50' : 'absolute top-full z-40 mt-1'} max-h-[70vh] min-w-48 animate-enter overflow-y-auto rounded-overlay border border-rule-soft bg-raised py-1 shadow-overlay {fixed ? '' : align === 'end' ? 'right-0' : 'left-0'} {menuClass}"
+			style={fixed ? at : undefined}
 			onkeydown={onkey}
 		>
 			{#each items as it, i (i)}

@@ -100,12 +100,14 @@ func (db *DB) GetOperation(ctx context.Context, id string) (domain.Operation, er
 // OperationFilter selects operations. UserID limits results to bots the user
 // owns or has been granted (empty = no restriction, for administrators).
 type OperationFilter struct {
-	BotID    string
-	UserID   string
-	Kinds    []string
-	Active   bool
-	BeforeMS int64 // cursor: created_at_ms strictly before this
-	Limit    int
+	BotID       string
+	UserID      string
+	WorkspaceID string // bots in this workspace (administrator views)
+	OwnerID     string // bots owned by this account (administrator views)
+	Kinds       []string
+	Active      bool
+	BeforeMS    int64 // cursor: created_at_ms strictly before this
+	Limit       int
 }
 
 func (db *DB) ListOperations(ctx context.Context, f OperationFilter) ([]domain.Operation, error) {
@@ -115,8 +117,15 @@ func (db *DB) ListOperations(ctx context.Context, f OperationFilter) ([]domain.O
 		where, args = append(where, "o.bot_id = ?"), append(args, f.BotID)
 	}
 	if f.UserID != "" {
-		where = append(where, "(b.owner_id = ? OR o.bot_id IN (SELECT bot_id FROM bot_subusers WHERE user_id = ?))")
-		args = append(args, f.UserID, f.UserID)
+		where = append(where, `(b.owner_id = ? OR o.bot_id IN (SELECT bot_id FROM bot_subusers WHERE user_id = ?)
+			OR b.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?))`)
+		args = append(args, f.UserID, f.UserID, f.UserID)
+	}
+	if f.WorkspaceID != "" {
+		where, args = append(where, "b.workspace_id = ?"), append(args, f.WorkspaceID)
+	}
+	if f.OwnerID != "" {
+		where, args = append(where, "b.owner_id = ?"), append(args, f.OwnerID)
 	}
 	if len(f.Kinds) > 0 {
 		where = append(where, "o.kind IN (?"+strings.Repeat(",?", len(f.Kinds)-1)+")")

@@ -99,8 +99,8 @@
 
 <div class="mt-5 flex flex-wrap items-center gap-2">
 	<div class="inline-flex rounded-control border border-rule bg-raised p-0.5" role="group" aria-label="Show">
-		<button class="rounded-[3px] px-3 py-1 font-medium {view === 'work' ? 'bg-ink text-paper' : 'text-ink/75 hover:bg-paper'}" aria-pressed={view === 'work'} onclick={() => (view = 'work')}>Work</button>
-		<button class="rounded-[3px] px-3 py-1 font-medium {view === 'changes' ? 'bg-ink text-paper' : 'text-ink/75 hover:bg-paper'}" aria-pressed={view === 'changes'} onclick={() => (view = 'changes')}>Changes</button>
+		<button class="rounded-inner px-3 py-1 font-medium {view === 'work' ? 'bg-ink text-paper' : 'text-ink/75 hover:bg-paper'}" aria-pressed={view === 'work'} onclick={() => (view = 'work')}>Work</button>
+		<button class="rounded-inner px-3 py-1 font-medium {view === 'changes' ? 'bg-ink text-paper' : 'text-ink/75 hover:bg-paper'}" aria-pressed={view === 'changes'} onclick={() => (view = 'changes')}>Changes</button>
 	</div>
 	<select class="field w-auto" bind:value={botF} aria-label="Bot">
 		<option value="">All bots</option>

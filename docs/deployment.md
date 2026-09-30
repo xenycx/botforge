@@ -53,6 +53,14 @@ registry mirror), `BOTPANEL_KEY_DIR`/`BOTPANEL_ACTIVE_KEY_ID`.
 * **OAuth sign-in and GitHub deployments:** `oauth.md`. Needs
   `BOTPANEL_PUBLIC_URL`; GitHub auto-deploy webhooks need GitHub to be able to
   reach `<PUBLIC_URL>/api/v1/webhooks/github`.
+* **Static sites:** off by default; set `BOTPANEL_SITES_LISTEN` (for example
+  `127.0.0.1:8081`) and `BOTPANEL_SITES_BASE_URL` (for example
+  `https://sites.example.com`), add a wildcard DNS record and route every
+  non-panel host name to that listener in the reverse proxy. Caddy's on-demand
+  TLS can ask the listener which host names may get certificates. Full setup:
+  `sites.md`. Releases live in `BOTPANEL_SITES_DIR`
+  (`/var/lib/botpanel/sites`, inside the service's `ReadWritePaths`); include
+  it in host backups.
 * **SFTP:** off by default; `BOTPANEL_SFTP_LISTEN=0.0.0.0:2022`. Open the port in
   your firewall. It is plain TCP: it does not work through an HTTP proxy or
   Cloudflare Tunnel. The host key is created at `/var/lib/botpanel/sftp_host_ed25519`.
@@ -76,3 +84,12 @@ registry mirror), `BOTPANEL_KEY_DIR`/`BOTPANEL_ACTIVE_KEY_ID`.
   logs.
 * Read `docs/isolation.md` before hosting untrusted users: there is no egress
   policy, admission control or disk quota out of the box.
+
+### Prometheus metrics
+
+Set `BOTPANEL_METRICS_TOKEN` to a random secret of at least 24 characters to
+enable `GET /metrics`. Scrapers must send `Authorization: Bearer <token>`.
+Leaving the variable empty keeps the endpoint disabled. Metrics cover process
+uptime and requests, database availability, aggregate bot lifecycle counts,
+and the latest node CPU, memory, disk, and running-bot gauges. Bot names, user
+IDs, and HTTP paths are deliberately not used as labels.

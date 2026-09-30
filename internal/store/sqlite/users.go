@@ -17,11 +17,22 @@ func scanUser(row interface{ Scan(...any) error }) (domain.User, error) {
 	return u, mapErr(err)
 }
 
-// CreateUser inserts a user; a duplicate email returns domain.ErrConflict.
+// CreateUser inserts a user and their personal workspace; a duplicate email
+// returns domain.ErrConflict.
 func (db *DB) CreateUser(ctx context.Context, u domain.User) error {
-	_, err := db.ExecContext(ctx, `INSERT INTO users (`+userCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,
-		u.ID, u.Email, u.DisplayName, u.AvatarJPEG, u.PasswordHash, u.Role, boolInt(u.Disabled), u.CreatedAtMS, u.UpdatedAtMS)
-	return mapErr(err)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (`+userCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+		u.ID, u.Email, u.DisplayName, u.AvatarJPEG, u.PasswordHash, u.Role, boolInt(u.Disabled), u.CreatedAtMS, u.UpdatedAtMS); err != nil {
+		return mapErr(err)
+	}
+	if err := createPersonalWorkspace(ctx, tx, u); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *DB) UpdateProfile(ctx context.Context, id, name string, avatar []byte, replaceAvatar bool, nowMS int64) error {

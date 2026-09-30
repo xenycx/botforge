@@ -96,7 +96,7 @@
 {#if !v && !error}
 	<div class="mt-4"><Skeleton rows={4} label="Loading settings" /></div>
 {:else if v}
-	<form class="mt-6 grid w-full min-w-0 max-w-3xl gap-6" onsubmit={save}>
+	<form class="mt-6 grid w-full min-w-0 max-w-3xl grid-cols-[minmax(0,1fr)] gap-6" onsubmit={save}>
 		<section class="card p-5 sm:p-6">
 			<h3 class="text-title font-semibold">Panel address</h3>
 			<p class="mt-1 text-small text-muted">The https origin people use to reach this panel. Sign-in providers return to it, and bots send statistics to it.</p>

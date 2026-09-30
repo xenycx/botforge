@@ -40,7 +40,7 @@ func toOp(o domain.Operation) opDTO {
 	return d
 }
 
-var opKinds = map[string]bool{domain.OpBuild: true, domain.OpDeploy: true, domain.OpBackup: true, domain.OpRestore: true, domain.OpRollback: true}
+var opKinds = map[string]bool{domain.OpBuild: true, domain.OpDeploy: true, domain.OpBackup: true, domain.OpRestore: true, domain.OpRollback: true, domain.OpPublish: true}
 
 // opQuery parses kind (comma separated), before (ms cursor) and limit.
 func opQuery(c fiber.Ctx) (kinds []string, before int64, limit int, err error) {

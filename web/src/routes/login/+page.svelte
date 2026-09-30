@@ -98,7 +98,7 @@
 
 <main class="grid min-h-dvh place-items-center px-4 py-10">
 	<div class="w-full max-w-sm">
-		<p class="flex items-center gap-2 text-title font-semibold tracking-tight"><img src="/favicon.svg" alt="" width="28" height="28" class="rounded-[7px]" />BotForge</p>
+		<p class="flex items-center gap-2 text-title font-semibold tracking-tight"><img src="/favicon.svg" alt="" width="28" height="28" class="rounded-tile" />BotForge</p>
 		<p class="eyebrow mt-8">{step === 'mfa' ? 'Step 2 of 2' : 'Welcome back'}</p>
 		<h1 class="mt-1 text-page">{step === 'mfa' ? 'Two-step verification' : 'Sign in'}<span class="text-action">.</span></h1>
 		<p class="mt-1 text-muted">{step === 'mfa' ? (useRecovery ? 'Enter one of your recovery codes. Each works once.' : 'Enter the 6-digit code from your authenticator app.') : 'Run and manage Discord bots on this server.'}</p>

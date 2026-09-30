@@ -19,7 +19,7 @@
 </script>
 <svelte:head><title>Create account · BotForge</title></svelte:head>
 <main class="grid min-h-dvh place-items-center px-4 py-10"><div class="w-full max-w-sm">
-	<a href="/" class="flex items-center gap-2 text-title font-semibold"><img src="/favicon.svg" alt="" width="28" height="28" class="rounded-[7px]" />BotForge</a>
+	<a href="/" class="flex items-center gap-2 text-title font-semibold"><img src="/favicon.svg" alt="" width="28" height="28" class="rounded-tile" />BotForge</a>
 	<h1 class="mt-8 text-page">Create your account<span class="text-action">.</span></h1>
 	{#if !enabled}<p class="mt-4 border-l-[3px] border-warn bg-panel px-3 py-2">Registration is closed. Ask an administrator to enable it.</p>
 	{:else if error && !invite}<p class="mt-4 border-l-[3px] border-fail bg-panel px-3 py-2 text-fail">{error}</p>

@@ -46,7 +46,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
 /** Sends raw bytes (file uploads); the body is streamed by the browser. */
 export async function upload(path: string, data: Blob | ArrayBuffer | string, contentType = 'application/octet-stream'): Promise<Response> {
 	const res = await fetch('/api/v1' + path, {
-		method: path.includes('/extract') ? 'POST' : 'PUT',
+		method: path.includes('/extract') || path.endsWith('/upload') ? 'POST' : 'PUT',
 		headers: { 'x-csrf-token': csrf, 'content-type': contentType },
 		body: data
 	});

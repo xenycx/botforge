@@ -33,6 +33,7 @@
 				document.documentElement.setAttribute('data-theme', t);
 				var a = localStorage.getItem('botforge.accent') || 'ember';
 				document.documentElement.setAttribute('data-accent', a);
+				document.documentElement.setAttribute('data-radius', localStorage.getItem('botforge.radius') || 'default');
 			} catch (e) {}
 		</script>
 		%sveltekit.head%

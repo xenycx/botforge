@@ -12,10 +12,11 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/build/ /src/internal/webui/dist/
-ARG VERSION=container
+ARG VERSION
 ARG TARGETOS
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/botpanel ./cmd/botpanel
+RUN build_version="${VERSION:-$(tr -d '\r\n' < VERSION)}" && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=${build_version}" -o /out/botpanel ./cmd/botpanel
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata
@@ -29,5 +30,5 @@ ENV BOTPANEL_ENV=production \
     BOTPANEL_KEY_DIR=/var/lib/botpanel/keys \
     BOTPANEL_RUNTIMES_DIR=/opt/botforge/runtimes
 VOLUME ["/var/lib/botpanel"]
-EXPOSE 8080 2022
+EXPOSE 8080 2022 8081
 ENTRYPOINT ["botpanel"]

@@ -22,7 +22,7 @@ func (db *DB) CreateSession(ctx context.Context, tokenHash []byte, s domain.Sess
 		return mapErr(err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ? AND token_hash NOT IN
-		(SELECT token_hash FROM sessions WHERE user_id = ? ORDER BY created_at_ms DESC LIMIT ?)`, s.UserID, s.UserID, MaxSessionsPerUser); err != nil {
+		(SELECT token_hash FROM sessions WHERE user_id = ? ORDER BY created_at_ms DESC, rowid DESC LIMIT ?)`, s.UserID, s.UserID, MaxSessionsPerUser); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"botpanel/internal/domain"
+	"botpanel/internal/filesystem"
 	"botpanel/internal/service"
 	"botpanel/internal/templates"
 )
@@ -141,4 +142,70 @@ func (s *server) githubWebhook(c fiber.Ctx) error {
 		return err
 	}
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": res})
+}
+
+// githubOwners lists the accounts the caller can create repositories under.
+func (s *server) githubOwners(c fiber.Ctx) error {
+	o, err := s.deploy.Owners(c.Context(), currentUser(c))
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"owners": o})
+}
+
+// pushPlan previews the files a publish or push would send.
+func (s *server) pushPlan(c fiber.Ctx) error {
+	set, err := s.deploy.PushPlan(c.Context(), currentUser(c), strings.Clone(c.Params("id")))
+	if err != nil {
+		return err
+	}
+	sample := set.Files
+	if len(sample) > 300 {
+		sample = sample[:300]
+	}
+	skipped := set.Skipped
+	if skipped == nil {
+		skipped = []filesystem.PushSkip{}
+	}
+	if sample == nil {
+		sample = []filesystem.PushFile{}
+	}
+	return c.JSON(fiber.Map{"files": len(set.Files), "bytes": set.Bytes, "ignored": set.Ignored, "skipped": skipped,
+		"sample": sample, "truncated": len(set.Files) > len(sample)})
+}
+
+// publishGitHub creates a repository from the bot's files and links it.
+func (s *server) publishGitHub(c fiber.Ctx) error {
+	var in struct {
+		Owner       string `json:"owner"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Private     bool   `json:"private"`
+		AutoDeploy  bool   `json:"auto_deploy"`
+	}
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	repo, err := s.deploy.Publish(c.Context(), currentUser(c), strings.Clone(c.Params("id")),
+		service.PublishInput{Owner: in.Owner, Name: in.Name, Description: in.Description, Private: in.Private, AutoDeploy: in.AutoDeploy})
+	if err != nil {
+		return err
+	}
+	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "queued", "repo": repo})
+}
+
+// pushGitHub commits the bot's current files to its linked repository.
+func (s *server) pushGitHub(c fiber.Ctx) error {
+	var in struct {
+		Message string `json:"message"`
+	}
+	if len(c.Body()) > 0 {
+		if err := decode(c, &in); err != nil {
+			return err
+		}
+	}
+	if err := s.deploy.Push(c.Context(), currentUser(c), strings.Clone(c.Params("id")), in.Message); err != nil {
+		return err
+	}
+	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "queued"})
 }

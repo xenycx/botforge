@@ -27,3 +27,24 @@ type HeartbeatWatch struct {
 	Prefs  AlertPrefs
 	Health *BotHealth
 }
+
+// HealthProbe is a loopback TCP/HTTP check against one of a bot's published
+// TCP ports. Runtime state lives with the configuration so it survives restarts.
+type HealthProbe struct {
+	BotID                string
+	Kind                 string // tcp | http; empty means disabled
+	HostPort             int
+	Path                 string
+	IntervalSeconds      int
+	TimeoutMS            int
+	FailureThreshold     int
+	SuccessThreshold     int
+	StartupGraceSeconds  int
+	RestartUnhealthy     bool
+	Status               string // unknown | starting | healthy | unhealthy
+	ConsecutiveFailures  int
+	ConsecutiveSuccesses int
+	LastCheckedAtMS      *int64
+	LastError            *string
+	UpdatedAtMS          int64
+}

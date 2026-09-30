@@ -62,6 +62,7 @@ func (s *server) createBot(c fiber.Ctx) error {
 		NanoCPUs    int64             `json:"nano_cpus"`
 		PidsLimit   int64             `json:"pids_limit"`
 		TemplateID  *string           `json:"template_id"`
+		WorkspaceID string            `json:"workspace_id"`
 		GitHub      *githubIn         `json:"github"`
 		Env         map[string]string `json:"env"`
 	}
@@ -70,7 +71,7 @@ func (s *server) createBot(c fiber.Ctx) error {
 	}
 	ci := service.CreateBotInput{
 		Name: in.Name, Runtime: in.Runtime, Argv: in.Argv, MemoryBytes: in.MemoryBytes,
-		NanoCPUs: in.NanoCPUs, PidsLimit: in.PidsLimit, TemplateID: in.TemplateID, Env: in.Env,
+		NanoCPUs: in.NanoCPUs, PidsLimit: in.PidsLimit, TemplateID: in.TemplateID, Env: in.Env, WorkspaceID: in.WorkspaceID,
 	}
 	if in.GitHub != nil {
 		if in.TemplateID != nil {
@@ -98,7 +99,14 @@ func (s *server) viewBot(c fiber.Ctx, b domain.Bot) botDTO {
 	d := toBot(b)
 	u := currentUser(c)
 	d.Permissions = s.bots.Permissions(c.Context(), u, b)
+	// Shared means access through a per-bot grant; teammates see workspace bots
+	// as their own workspace's, not as shared.
 	d.Shared = b.OwnerID != u.ID && !u.IsAdmin()
+	if d.Shared {
+		if role, _ := s.bots.Store.BotWorkspaceRole(c.Context(), b.ID, u.ID); role != "" {
+			d.Shared = false
+		}
+	}
 	d.Phase = phaseOf(b, s.runnerErr(c.Context()), s.bots.Notifier != nil)
 	return d
 }

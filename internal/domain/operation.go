@@ -7,6 +7,7 @@ const (
 	OpBackup   = "backup"
 	OpRestore  = "restore"
 	OpRollback = "rollback"
+	OpPublish  = "publish" // push the workspace to GitHub
 )
 
 // Operation statuses. Queued and running are active; the rest are final.

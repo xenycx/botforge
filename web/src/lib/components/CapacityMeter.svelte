@@ -11,8 +11,8 @@
 		<span class="font-mono text-small"><span class="font-medium text-ink">{format(value)}</span><span class="text-muted"> / {max > 0 ? format(max) : 'no limit'}</span></span>
 	</div>
 	{#if max > 0}
-		<div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-rule-soft" role="meter" aria-label={label} aria-valuemin="0" aria-valuemax={max} aria-valuenow={value}>
-			<div class="h-full rounded-full {tone} transition-[width]" style="width: {pct}%"></div>
+		<div class="mt-1.5 h-1.5 overflow-hidden rounded-pill bg-rule-soft" role="meter" aria-label={label} aria-valuemin="0" aria-valuemax={max} aria-valuenow={value}>
+			<div class="h-full rounded-pill {tone} transition-[width]" style="width: {pct}%"></div>
 		</div>
 	{/if}
 </div>

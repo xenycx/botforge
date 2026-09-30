@@ -90,6 +90,23 @@ type Store interface {
 	MarkBotDeleted(ctx context.Context, id string, nowMS int64) error
 	DeleteBotRow(ctx context.Context, id string) error
 
+	CreateWorkspace(ctx context.Context, w domain.Workspace) error
+	GetWorkspace(ctx context.Context, id string) (domain.Workspace, error)
+	PersonalWorkspace(ctx context.Context, userID string) (domain.Workspace, error)
+	ListWorkspacesForUser(ctx context.Context, userID string) ([]domain.WorkspaceSummary, error)
+	ListAllWorkspaces(ctx context.Context, callerID string) ([]domain.WorkspaceSummary, error)
+	WorkspaceSummaryFor(ctx context.Context, id, callerID string) (domain.WorkspaceSummary, error)
+	CountOwnedWorkspaces(ctx context.Context, userID string) (int, error)
+	RenameWorkspace(ctx context.Context, id, name string, nowMS int64) error
+	DeleteWorkspace(ctx context.Context, id string) error
+	WorkspaceRole(ctx context.Context, workspaceID, userID string) (string, error)
+	BotWorkspaceRole(ctx context.Context, botID, userID string) (string, error)
+	ListWorkspaceMembers(ctx context.Context, workspaceID string) ([]domain.WorkspaceMember, error)
+	SetWorkspaceMember(ctx context.Context, m domain.WorkspaceMember) error
+	RemoveWorkspaceMember(ctx context.Context, workspaceID, userID string) error
+	SetBotWorkspace(ctx context.Context, botID, workspaceID string, nowMS int64) error
+	ListWorkspaceBots(ctx context.Context, workspaceID string) ([]domain.Bot, error)
+
 	ListEnv(ctx context.Context, botID string) ([]domain.EnvVar, error)
 	UpsertEnv(ctx context.Context, botID string, vars []domain.EnvVar, nowMS int64) error
 	DeleteEnv(ctx context.Context, botID, name string, nowMS int64) error

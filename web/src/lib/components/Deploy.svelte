@@ -11,6 +11,7 @@
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import OperationRow from '$lib/components/OperationRow.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import GitHubPublish from '$lib/components/GitHubPublish.svelte';
 	import { session } from '$lib/session.svelte';
 
 	let { bot, admin }: { bot: Bot; admin: boolean } = $props();
@@ -41,7 +42,7 @@
 		link = g.linked ? g.repo! : null;
 		if (link && !settingsOpen) form = { full_name: link.full_name, branch: link.branch, root_dir: link.root_dir, auto_deploy: link.auto_deploy };
 		loaded = true;
-		history = (await api<OpPage>('GET', `/bots/${bot.id}/operations?kind=deploy,rollback&limit=15`)).operations;
+		history = (await api<OpPage>('GET', `/bots/${bot.id}/operations?kind=deploy,rollback,publish&limit=15`)).operations;
 	}
 
 	onMount(() => {
@@ -49,7 +50,7 @@
 		init();
 		const t = setInterval(() => {
 			now = Date.now();
-			if (document.visibilityState === 'visible' && (link?.deploying || history.some((o) => o.status === 'running'))) load().catch(() => {});
+			if (document.visibilityState === 'visible' && (link?.deploying || history.some((o) => o.status === 'running' || o.status === 'queued'))) load().catch(() => {});
 		}, 2000);
 		return () => clearInterval(t);
 	});
@@ -242,6 +243,15 @@
 				<p class="mt-2 text-muted">Each deployment is listed here with its commit, trigger and result.</p>
 			{/if}
 		</section>
+	{/if}
+
+	<div class="mt-6">
+		<GitHubPublish {bot} {link} {conn} {admin} onqueued={() => load().catch(() => {})} />
+	</div>
+	{#if !link && history.some((o) => o.kind === 'publish')}
+		<ul class="mt-4 border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+			{#each history.filter((o) => o.kind === 'publish').slice(0, 3) as op (op.id)}<OperationRow {op} {now} />{/each}
+		</ul>
 	{/if}
 
 	{#if admin}

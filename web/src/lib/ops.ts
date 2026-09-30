@@ -6,7 +6,8 @@ export const kindNoun: Record<Operation['kind'], string> = {
 	deploy: 'Deployment',
 	rollback: 'Rollback',
 	backup: 'Backup',
-	restore: 'Restore'
+	restore: 'Restore',
+	publish: 'Push to GitHub'
 };
 /** "Deploying music-bot", used while an operation is active. */
 export const kindVerb: Record<Operation['kind'], string> = {
@@ -14,7 +15,8 @@ export const kindVerb: Record<Operation['kind'], string> = {
 	deploy: 'Deploying',
 	rollback: 'Rolling back',
 	backup: 'Backing up',
-	restore: 'Restoring'
+	restore: 'Restoring',
+	publish: 'Pushing'
 };
 export const statusText: Record<Operation['status'], string> = {
 	queued: 'Waiting',
@@ -49,7 +51,7 @@ export function elapsed(o: Operation, now = Date.now()): string {
 
 /** Where to look at an operation in the bot workspace. */
 export function opHref(o: Operation): string {
-	const tab = o.kind === 'deploy' || o.kind === 'rollback' ? 'deploy' : o.kind === 'backup' || o.kind === 'restore' ? 'backups' : 'overview';
+	const tab = o.kind === 'deploy' || o.kind === 'rollback' || o.kind === 'publish' ? 'deploy' : o.kind === 'backup' || o.kind === 'restore' ? 'backups' : 'overview';
 	return `/bots/${o.bot_id}?tab=${tab}&op=${o.id}`;
 }
 

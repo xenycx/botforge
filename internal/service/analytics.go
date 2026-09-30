@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -31,6 +32,8 @@ type AnalyticsStore interface {
 	TrimBotTelemetry(ctx context.Context, botID string, keep, batch int) (int64, error)
 	UpsertBotWidgets(ctx context.Context, widgets []domain.BotWidget) error
 	ListBotWidgets(ctx context.Context, botID string) ([]domain.BotWidget, error)
+	DeleteBotWidgets(ctx context.Context, botID string, keys []string) error
+	SetBotDiscordIdentity(ctx context.Context, botID, userID, username, avatarURL string, nowMS int64) error
 }
 
 // Limits on what a bot may push.
@@ -39,7 +42,7 @@ const (
 	maxStatsPerPush     = 16
 	maxCommandsPerPush  = 20
 	maxEventsPerPush    = 10
-	maxWidgetsPerPush   = 24
+	maxWidgetsPerPush   = 48
 	maxEventData        = 1024
 	statMinInterval     = 10 * time.Second // per (bot, stat): faster samples are dropped
 	MaxTelemetryRowsBot = 20000
@@ -52,7 +55,12 @@ var telemetryName = regexp.MustCompile(`^[A-Za-z0-9_.:\- ]{1,64}$`)
 // TelemetryPayload is what a bot pushes.
 type TelemetryPayload struct {
 	// Ready is the bot's own view of its Discord connection (optional).
-	Ready    *bool              `json:"ready"`
+	Ready    *bool `json:"ready"`
+	Identity *struct {
+		ID        string `json:"id"`
+		Username  string `json:"username"`
+		AvatarURL string `json:"avatar_url"`
+	} `json:"identity"`
 	Stats    map[string]float64 `json:"stats"`
 	Commands []struct {
 		Name  string `json:"name"`
@@ -63,12 +71,17 @@ type TelemetryPayload struct {
 		Data json.RawMessage `json:"data"`
 	} `json:"events"`
 	Widgets []struct {
-		Key      string          `json:"key"`
-		Kind     string          `json:"kind"`
-		Title    string          `json:"title"`
-		Position int             `json:"position"`
-		Data     json.RawMessage `json:"data"`
+		Key        string          `json:"key"`
+		Kind       string          `json:"kind"`
+		Title      string          `json:"title"`
+		Group      string          `json:"group"`
+		Span       int             `json:"span"`
+		MinHeight  int             `json:"min_height"`
+		Position   int             `json:"position"`
+		TTLSeconds int             `json:"ttl_seconds"`
+		Data       json.RawMessage `json:"data"`
 	} `json:"widgets"`
+	Unpublish []string `json:"unpublish"`
 }
 
 // Analytics ingests and reports bot-pushed metrics.
@@ -128,11 +141,38 @@ func (a *Analytics) Authenticate(ctx context.Context, key string) (string, error
 	return id, err
 }
 
+// DeleteWidgets explicitly unpublishes widgets for an authenticated dashboard user.
+func (a *Analytics) DeleteWidgets(ctx context.Context, botID string, keys []string) error {
+	if len(keys) == 0 || len(keys) > maxWidgetsPerPush {
+		return domain.Invalid("provide between 1 and 48 widget keys")
+	}
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if !telemetryName.MatchString(key) || seen[key] {
+			return domain.Invalid("widget keys must be unique valid widget identifiers")
+		}
+		seen[key] = true
+	}
+	return a.Store.DeleteBotWidgets(ctx, botID, keys)
+}
+
 // Ingest validates and stores a push. Stat samples that arrive faster than
 // statMinInterval per name are dropped (still acknowledged) to bound storage.
 func (a *Analytics) Ingest(ctx context.Context, botID string, p TelemetryPayload) (stored int, err error) {
-	if len(p.Stats) > maxStatsPerPush || len(p.Commands) > maxCommandsPerPush || len(p.Events) > maxEventsPerPush || len(p.Widgets) > maxWidgetsPerPush {
-		return 0, domain.Invalid("too many stats, commands, events or widgets in one push")
+	if len(p.Stats) > maxStatsPerPush {
+		return 0, domain.Invalid("stats may contain at most 16 entries per push")
+	}
+	if len(p.Commands) > maxCommandsPerPush {
+		return 0, domain.Invalid("commands may contain at most 20 entries per push")
+	}
+	if len(p.Events) > maxEventsPerPush {
+		return 0, domain.Invalid("events may contain at most 10 entries per push")
+	}
+	if len(p.Widgets) > maxWidgetsPerPush {
+		return 0, domain.Invalid("widgets may contain at most 48 entries per push")
+	}
+	if len(p.Unpublish) > maxWidgetsPerPush {
+		return 0, domain.Invalid("unpublish may contain at most 48 widget keys per push")
 	}
 	now := a.now()
 	ms := now.UnixMilli()
@@ -185,30 +225,96 @@ func (a *Analytics) Ingest(ctx context.Context, botID string, p TelemetryPayload
 	widgets := make([]domain.BotWidget, 0, len(p.Widgets))
 	seenWidgets := map[string]bool{}
 	for _, w := range p.Widgets {
-		if !telemetryName.MatchString(w.Key) || seenWidgets[w.Key] || len(strings.TrimSpace(w.Title)) < 1 || len(w.Title) > 80 || w.Position < 0 || w.Position > 1000 {
-			return 0, domain.Invalid("invalid widget key, title or position")
+		if !telemetryName.MatchString(w.Key) {
+			return 0, domain.Invalid("widget key must be 1-64 letters, numbers, spaces, dots, colons, underscores or hyphens")
+		}
+		if seenWidgets[w.Key] {
+			return 0, domain.Invalid("widget key appears more than once: " + w.Key)
+		}
+		title := strings.TrimSpace(w.Title)
+		if len(title) < 1 || len(title) > 80 {
+			return 0, domain.Invalid("widget " + w.Key + " title must be 1-80 characters")
+		}
+		if w.Position < 0 || w.Position > 1000 {
+			return 0, domain.Invalid("widget " + w.Key + " position must be between 0 and 1000")
 		}
 		seenWidgets[w.Key] = true
 		switch w.Kind {
-		case "metric", "status", "progress", "text", "chart", "table", "link":
+		case "metric", "status", "progress", "text", "chart", "table", "link", "line", "area", "donut", "gauge", "heatmap", "sparkline", "kv", "markdown", "image", "log", "code":
 		default:
-			return 0, domain.Invalid("unknown widget kind")
+			return 0, domain.Invalid("widget " + w.Key + " has unknown kind " + w.Kind)
 		}
 		if len(w.Data) == 0 || len(w.Data) > 4096 || !json.Valid(w.Data) || bytes.Equal(bytes.TrimSpace(w.Data), []byte("null")) {
-			return 0, domain.Invalid("widget data must be valid JSON of at most 4096 bytes")
+			return 0, domain.Invalid("widget " + w.Key + " data must be valid non-null JSON of at most 4096 bytes")
 		}
-		widgets = append(widgets, domain.BotWidget{BotID: botID, Key: w.Key, Kind: w.Kind, Title: strings.TrimSpace(w.Title), Position: w.Position, PayloadJSON: string(w.Data), UpdatedAtMS: ms})
+		if err := validateWidgetData(w.Key, w.Kind, w.Data); err != nil {
+			return 0, err
+		}
+		group := strings.TrimSpace(w.Group)
+		if group == "" {
+			group = "Overview"
+		}
+		if len(group) > 48 {
+			return 0, domain.Invalid("widget " + w.Key + " group must be at most 48 characters")
+		}
+		span := w.Span
+		if span == 0 {
+			span = 1
+		}
+		if span < 1 || span > 3 {
+			return 0, domain.Invalid("widget " + w.Key + " span must be 1, 2 or 3")
+		}
+		if w.MinHeight < 0 || w.MinHeight > 800 {
+			return 0, domain.Invalid("widget " + w.Key + " min_height must be between 0 and 800")
+		}
+		var expires *int64
+		if w.TTLSeconds != 0 {
+			if w.TTLSeconds < 30 || w.TTLSeconds > 604800 {
+				return 0, domain.Invalid("widget " + w.Key + " ttl_seconds must be between 30 and 604800")
+			}
+			x := ms + int64(w.TTLSeconds)*1000
+			expires = &x
+		}
+		widgets = append(widgets, domain.BotWidget{BotID: botID, Key: w.Key, Kind: w.Kind, Title: title, Group: group, Span: span, MinHeight: w.MinHeight, Position: w.Position, PayloadJSON: string(w.Data), UpdatedAtMS: ms, ExpiresAtMS: expires})
+	}
+	seenDelete := map[string]bool{}
+	for _, key := range p.Unpublish {
+		if !telemetryName.MatchString(key) {
+			return 0, domain.Invalid("unpublish contains an invalid widget key")
+		}
+		if seenWidgets[key] {
+			return 0, domain.Invalid("widget " + key + " cannot be published and unpublished in the same push")
+		}
+		seenDelete[key] = true
+	}
+	if p.Identity != nil {
+		if p.Ready == nil || !*p.Ready {
+			return 0, domain.Invalid("identity is accepted only when ready is true")
+		}
+		if !validDiscordIdentity(p.Identity.ID, p.Identity.Username, p.Identity.AvatarURL) {
+			return 0, domain.Invalid("identity must contain a Discord user id, username, and Discord CDN avatar URL")
+		}
+		if err := a.Store.SetBotDiscordIdentity(ctx, botID, p.Identity.ID, strings.TrimSpace(p.Identity.Username), p.Identity.AvatarURL, ms); err != nil {
+			return 0, err
+		}
 	}
 	// A valid push, even an empty one, is a heartbeat.
 	if a.Heartbeat != nil {
 		a.Heartbeat(ctx, botID, p.Ready)
 	}
 	if len(rows) == 0 {
-		if len(widgets) > 0 {
+		if len(widgets) > 0 || len(seenDelete) > 0 {
 			if err := a.Store.UpsertBotWidgets(ctx, widgets); err != nil {
 				return 0, err
 			}
-			return len(widgets), nil
+			keys := make([]string, 0, len(seenDelete))
+			for key := range seenDelete {
+				keys = append(keys, key)
+			}
+			if err := a.Store.DeleteBotWidgets(ctx, botID, keys); err != nil {
+				return 0, err
+			}
+			return len(widgets) + len(keys), nil
 		}
 		return 0, nil
 	}
@@ -220,7 +326,142 @@ func (a *Analytics) Ingest(ctx context.Context, botID string, p TelemetryPayload
 			return 0, err
 		}
 	}
-	return len(rows) + len(widgets), nil
+	keys := make([]string, 0, len(seenDelete))
+	for key := range seenDelete {
+		keys = append(keys, key)
+	}
+	if err := a.Store.DeleteBotWidgets(ctx, botID, keys); err != nil {
+		return 0, err
+	}
+	return len(rows) + len(widgets) + len(keys), nil
+}
+
+var discordID = regexp.MustCompile(`^[0-9]{15,24}$`)
+
+func validDiscordIdentity(id, username, avatarURL string) bool {
+	if !discordID.MatchString(id) || len(strings.TrimSpace(username)) < 1 || len(username) > 80 || len(avatarURL) > 512 {
+		return false
+	}
+	u, err := url.ParseRequestURI(avatarURL)
+	if err != nil || u.Scheme != "https" || (u.Host != "cdn.discordapp.com" && u.Host != "media.discordapp.net") {
+		return false
+	}
+	return strings.HasPrefix(u.Path, "/avatars/"+id+"/") || strings.HasPrefix(u.Path, "/embed/avatars/")
+}
+
+func validateWidgetData(key, kind string, raw json.RawMessage) error {
+	var d map[string]any
+	if json.Unmarshal(raw, &d) != nil || d == nil {
+		return domain.Invalid("widget " + key + " data must be a JSON object")
+	}
+	bad := func(want string) error {
+		return domain.Invalid("widget " + key + " (" + kind + ") data must contain " + want)
+	}
+	num := func(name string) bool { v, ok := d[name].(float64); return ok && !math.IsNaN(v) && !math.IsInf(v, 0) }
+	str := func(name string) bool { _, ok := d[name].(string); return ok }
+	items := func(name string, limit int) ([]any, bool) { v, ok := d[name].([]any); return v, ok && len(v) <= limit }
+	series := func(name string, limit int) bool {
+		v, ok := items(name, limit)
+		if !ok {
+			return false
+		}
+		for _, x := range v {
+			m, ok := x.(map[string]any)
+			if !ok {
+				return false
+			}
+			n, ok := m["value"].(float64)
+			if !ok || math.IsNaN(n) || math.IsInf(n, 0) {
+				return false
+			}
+			if label, exists := m["label"]; exists {
+				if _, ok := label.(string); !ok {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	switch kind {
+	case "metric":
+		if !num("value") {
+			return bad("a numeric value")
+		}
+	case "status":
+		state, ok := d["state"].(string)
+		if !ok || !str("text") || (state != "good" && state != "warn" && state != "bad" && state != "neutral") {
+			return bad("state (good|warn|bad|neutral) and text strings")
+		}
+	case "progress", "gauge":
+		if !num("value") {
+			return bad("a numeric value and optional numeric max")
+		}
+		if _, ok := d["max"]; ok && !num("max") {
+			return bad("a numeric value and optional numeric max")
+		}
+	case "text", "markdown", "log":
+		if !str("text") {
+			return bad("a text string")
+		}
+	case "code":
+		if !str("code") {
+			return bad("a code string")
+		}
+	case "link", "image":
+		rawURL, ok := d["url"].(string)
+		u, err := url.ParseRequestURI(rawURL)
+		if !ok || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return bad("an absolute http(s) url")
+		}
+	case "chart", "line", "area", "sparkline":
+		if !series("points", 100) {
+			return bad("points (up to 100 {label?, value:number} items)")
+		}
+	case "donut":
+		if !series("values", 30) {
+			return bad("values (up to 30 {label?, value:number} items)")
+		}
+	case "heatmap":
+		if !series("cells", 120) {
+			return bad("cells (up to 120 {label?, value:number} items)")
+		}
+	case "kv":
+		v, ok := items("items", 30)
+		if !ok {
+			return bad("items (up to 30 {key, value} items)")
+		}
+		for _, x := range v {
+			m, ok := x.(map[string]any)
+			if !ok {
+				return bad("items (up to 30 {key, value} items)")
+			}
+			if _, ok = m["key"].(string); !ok {
+				return bad("items with string keys")
+			}
+			switch m["value"].(type) {
+			case string, float64, bool:
+			default:
+				return bad("items with string, number or boolean values")
+			}
+		}
+	case "table":
+		cols, ok := items("columns", 12)
+		if !ok {
+			return bad("columns (up to 12) and rows (up to 50)")
+		}
+		_ = cols
+		tableRows, ok := items("rows", 50)
+		if !ok {
+			return bad("columns (up to 12) and rows (up to 50)")
+		}
+		for _, r := range tableRows {
+			cells, ok := r.([]any)
+			if !ok || len(cells) > 12 {
+				return bad("rows containing at most 12 cells")
+			}
+		}
+	}
+	return nil
 }
 
 // stat reports whether a sample for (bot, name) may be stored now.
@@ -286,9 +527,14 @@ type WidgetOut struct {
 	Key         string          `json:"key"`
 	Kind        string          `json:"kind"`
 	Title       string          `json:"title"`
+	Group       string          `json:"group"`
+	Span        int             `json:"span"`
+	MinHeight   int             `json:"min_height"`
 	Position    int             `json:"position"`
 	Data        json.RawMessage `json:"data"`
 	UpdatedAtMS int64           `json:"updated_at_ms"`
+	ExpiresAtMS *int64          `json:"expires_at_ms"`
+	Stale       bool            `json:"stale"`
 }
 
 // Report builds the dashboard data for a window ending now.
@@ -349,7 +595,7 @@ func (a *Analytics) Report(ctx context.Context, botID string, window time.Durati
 	}
 	r.Widgets = make([]WidgetOut, len(ws))
 	for i, w := range ws {
-		r.Widgets[i] = WidgetOut{w.Key, w.Kind, w.Title, w.Position, json.RawMessage(w.PayloadJSON), w.UpdatedAtMS}
+		r.Widgets[i] = WidgetOut{Key: w.Key, Kind: w.Kind, Title: w.Title, Group: w.Group, Span: w.Span, MinHeight: w.MinHeight, Position: w.Position, Data: json.RawMessage(w.PayloadJSON), UpdatedAtMS: w.UpdatedAtMS, ExpiresAtMS: w.ExpiresAtMS, Stale: a.now().UnixMilli()-w.UpdatedAtMS > int64(5*time.Minute/time.Millisecond)}
 		if w.UpdatedAtMS > r.LastAtMS {
 			r.LastAtMS = w.UpdatedAtMS
 		}

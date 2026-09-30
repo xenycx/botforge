@@ -43,7 +43,7 @@
 		{#each shown as t (t.id)}
 			<li class="card flex flex-col p-5">
 				<div class="flex items-center justify-between gap-2">
-					<span class="grid size-10 place-items-center rounded-[10px] font-mono text-small font-semibold" style="background: color-mix(in srgb, {accent[t.language] ?? '#ea621f'} 18%, transparent); color: {accent[t.language] ?? '#ea621f'}">{t.language.slice(0, 2).toUpperCase()}</span>
+					<span class="grid size-10 place-items-center rounded-tile font-mono text-small font-semibold" style="background: color-mix(in srgb, {accent[t.language] ?? '#ea621f'} 18%, transparent); color: {accent[t.language] ?? '#ea621f'}">{t.language.slice(0, 2).toUpperCase()}</span>
 					<span class="pill">{t.language}</span>
 				</div>
 				<h2 class="mt-4 text-title font-semibold">{t.name}</h2>

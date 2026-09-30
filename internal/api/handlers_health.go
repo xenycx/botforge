@@ -49,6 +49,47 @@ func (s *server) testAlert(c fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+type healthProbeDTO struct {
+	Kind                 string  `json:"kind"`
+	HostPort             int     `json:"host_port"`
+	Path                 string  `json:"path"`
+	IntervalSeconds      int     `json:"interval_s"`
+	TimeoutMS            int     `json:"timeout_ms"`
+	FailureThreshold     int     `json:"failure_threshold"`
+	SuccessThreshold     int     `json:"success_threshold"`
+	StartupGraceSeconds  int     `json:"startup_grace_s"`
+	RestartUnhealthy     bool    `json:"restart_unhealthy"`
+	Status               string  `json:"status"`
+	ConsecutiveFailures  int     `json:"consecutive_failures"`
+	ConsecutiveSuccesses int     `json:"consecutive_successes"`
+	LastCheckedAtMS      *int64  `json:"last_checked_at_ms"`
+	LastError            *string `json:"last_error"`
+}
+
+func toHealthProbe(p domain.HealthProbe) healthProbeDTO {
+	return healthProbeDTO{p.Kind, p.HostPort, p.Path, p.IntervalSeconds, p.TimeoutMS, p.FailureThreshold, p.SuccessThreshold, p.StartupGraceSeconds, p.RestartUnhealthy, p.Status, p.ConsecutiveFailures, p.ConsecutiveSuccesses, p.LastCheckedAtMS, p.LastError}
+}
+
+func (s *server) getHealthProbe(c fiber.Ctx) error {
+	p, err := s.health.GetProbe(c.Context(), currentUser(c), strings.Clone(c.Params("id")))
+	if err != nil {
+		return err
+	}
+	return c.JSON(toHealthProbe(p))
+}
+
+func (s *server) putHealthProbe(c fiber.Ctx) error {
+	var in healthProbeDTO
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	p, err := s.health.SetProbe(c.Context(), currentUser(c), strings.Clone(c.Params("id")), domain.HealthProbe{Kind: in.Kind, HostPort: in.HostPort, Path: in.Path, IntervalSeconds: in.IntervalSeconds, TimeoutMS: in.TimeoutMS, FailureThreshold: in.FailureThreshold, SuccessThreshold: in.SuccessThreshold, StartupGraceSeconds: in.StartupGraceSeconds, RestartUnhealthy: in.RestartUnhealthy})
+	if err != nil {
+		return err
+	}
+	return c.JSON(toHealthProbe(p))
+}
+
 func (s *server) capacity(c fiber.Ctx) error {
 	u := currentUser(c)
 	cp, err := s.bots.Capacity(c.Context(), u)

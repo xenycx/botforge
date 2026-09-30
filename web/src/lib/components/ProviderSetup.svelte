@@ -20,13 +20,13 @@
 	}
 </script>
 
-<ol class="grid gap-2.5 text-small">
+<ol class="grid grid-cols-[minmax(0,1fr)] gap-2.5 text-small">
 	{#if gh}
-		<li class="flex gap-3"><span class="step-no">1</span><span>Open <a class="link" href="https://github.com/settings/applications/new" target="_blank" rel="noopener">GitHub → Settings → Developer settings → OAuth Apps → New OAuth App</a>.</span></li>
-		<li class="flex gap-3"><span class="step-no">2</span><span>Use any name (for example <em>BotForge</em>). Homepage URL: <code class="copyable">{base || 'your panel address'}</code></span></li>
+		<li class="flex gap-3"><span class="step-no">1</span><span class="min-w-0 flex-1 break-words">Open <a class="link" href="https://github.com/settings/applications/new" target="_blank" rel="noopener">GitHub → Settings → Developer settings → OAuth Apps → New OAuth App</a>.</span></li>
+		<li class="flex gap-3"><span class="step-no">2</span><span class="min-w-0 flex-1 break-words">Use any name (for example <em>BotForge</em>). Homepage URL: <code class="copyable break-all">{base || 'your panel address'}</code></span></li>
 	{:else}
-		<li class="flex gap-3"><span class="step-no">1</span><span>Open the <a class="link" href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a>, create an application (or reuse one) and open <strong>OAuth2</strong>.</span></li>
-		<li class="flex gap-3"><span class="step-no">2</span><span>Under <strong>Redirects</strong>, add the address below and save.</span></li>
+		<li class="flex gap-3"><span class="step-no">1</span><span class="min-w-0 flex-1 break-words">Open the <a class="link" href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a>, create an application (or reuse one) and open <strong>OAuth2</strong>.</span></li>
+		<li class="flex gap-3"><span class="step-no">2</span><span class="min-w-0 flex-1 break-words">Under <strong>Redirects</strong>, add the address below and save.</span></li>
 	{/if}
 	<li class="flex gap-3">
 		<span class="step-no">3</span>
@@ -38,7 +38,7 @@
 			</span>
 		</span>
 	</li>
-	<li class="flex gap-3"><span class="step-no">4</span><span>{gh ? 'Register the app, then generate a client secret.' : 'Copy the Client ID and reset the Client Secret.'} Paste both here.</span></li>
+	<li class="flex gap-3"><span class="step-no">4</span><span class="min-w-0 flex-1 break-words">{gh ? 'Register the app, then generate a client secret.' : 'Copy the Client ID and reset the Client Secret.'} Paste both here.</span></li>
 </ol>
 
 <div class="mt-4 grid gap-3 sm:grid-cols-2">

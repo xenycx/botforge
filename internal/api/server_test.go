@@ -46,6 +46,29 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestMetricsDisabledAndBearerProtected(t *testing.T) {
+	app := New(Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), DB: fakeDB{}})
+	if code, _, _ := do(t, app, "GET", "/metrics"); code != 404 {
+		t.Fatalf("disabled metrics = %d", code)
+	}
+	const token = "this-is-a-long-metrics-token"
+	app = New(Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), DB: fakeDB{}, MetricsToken: token})
+	if code, _, _ := do(t, app, "GET", "/metrics"); code != 401 {
+		t.Fatalf("anonymous metrics = %d", code)
+	}
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "botpanel_database_up 1") || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
+		t.Fatalf("metrics: %d %s", resp.StatusCode, body)
+	}
+}
+
 func TestReadinessReflectsDatabase(t *testing.T) {
 	app := newApp(errors.New("boom"))
 	code, _, body := do(t, app, "GET", "/api/v1/readyz")

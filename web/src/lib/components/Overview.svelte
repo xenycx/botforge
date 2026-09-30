@@ -166,7 +166,7 @@
 					{#each steps as s, i (s.label)}
 						<li class="flex items-start gap-3 border-b border-rule-soft py-3 last:border-b-0">
 							<span
-								class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-small font-semibold {s.done === true ? 'bg-run text-white' : s.done === false ? 'border-2 border-warn text-warn' : 'border border-rule text-muted'}"
+								class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-pill text-small font-semibold {s.done === true ? 'bg-run text-white' : s.done === false ? 'border-2 border-warn text-warn' : 'border border-rule text-muted'}"
 								aria-hidden="true">{#if s.done === true}<Icon name="check" size={13} />{:else}{i + 1}{/if}</span
 							>
 							<div class="min-w-0 flex-1">

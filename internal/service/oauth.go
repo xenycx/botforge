@@ -300,6 +300,24 @@ func (s *OAuthService) GitHubToken(ctx context.Context, userID string) (string, 
 	return "", domain.ErrNotFound
 }
 
+// GitHubPushToken returns the user's GitHub token when it may write to
+// repositories (repo scope); otherwise a message explaining what to do.
+func (s *OAuthService) GitHubPushToken(ctx context.Context, userID string) (string, error) {
+	accts, err := s.Store.ListOAuthAccounts(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range accts {
+		if a.Provider == domain.ProviderGitHub && a.TokenKeyID != nil {
+			if !hasScope(a.Scopes, "repo") {
+				return "", domain.Invalid("grant repository access to your GitHub connection in Settings → Connected accounts first")
+			}
+			return s.GitHubToken(ctx, userID)
+		}
+	}
+	return "", domain.Invalid("connect your GitHub account in Settings → Connected accounts first")
+}
+
 // Connection is one row of the Connected Accounts page.
 type Connection struct {
 	Provider      string
