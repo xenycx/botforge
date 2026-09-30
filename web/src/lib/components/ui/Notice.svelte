@@ -13,15 +13,15 @@
 	}: { tone?: 'info' | 'warn' | 'fail' | 'success'; title?: string; children?: Snippet; action?: Snippet; class?: string; live?: boolean } = $props();
 
 	const s = {
-		info: { bar: 'border-action', icon: 'info', color: 'text-action' },
-		warn: { bar: 'border-warn', icon: 'alert', color: 'text-warn' },
-		fail: { bar: 'border-fail', icon: 'alert', color: 'text-fail' },
-		success: { bar: 'border-run', icon: 'check', color: 'text-run' }
+		info: { bar: 'border-action/25 bg-action/6', icon: 'info', color: 'text-action' },
+		warn: { bar: 'border-warn/30 bg-warn/7', icon: 'alert', color: 'text-warn' },
+		fail: { bar: 'border-fail/30 bg-fail/7', icon: 'alert', color: 'text-fail' },
+		success: { bar: 'border-run/25 bg-run/6', icon: 'check', color: 'text-run' }
 	} as const;
 </script>
 
 <div
-	class="flex flex-wrap items-start gap-x-3 gap-y-2 border-l-[3px] bg-panel px-3.5 py-2.5 {s[tone].bar} {cls}"
+	class="flex flex-wrap items-start gap-x-3 gap-y-2 rounded-tile border px-3.5 py-2.5 {s[tone].bar} {cls}"
 	role={live ? (tone === 'fail' ? 'alert' : 'status') : undefined}
 >
 	<Icon name={s[tone].icon} class="mt-[3px] {s[tone].color}" />

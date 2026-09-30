@@ -13,6 +13,7 @@
 	let sites = $state<Site[] | null>(null);
 	let error = $state('');
 	let q = $state('');
+	let served = $state<'all' | 'live' | 'suspended'>('all');
 
 	async function load() {
 		try {
@@ -23,8 +24,16 @@
 		}
 	}
 	onMount(load);
-	const shown = $derived((sites ?? []).filter((s) => !q.trim() || `${s.name} ${s.slug} ${s.owner_email} ${s.workspace_name}`.toLowerCase().includes(q.trim().toLowerCase())));
+	const shown = $derived(
+		(sites ?? []).filter(
+			(s) =>
+				(served === 'all' || (served === 'suspended') === s.disabled) &&
+				(!q.trim() || `${s.name} ${s.slug} ${s.owner_email} ${s.workspace_name}`.toLowerCase().includes(q.trim().toLowerCase()))
+		)
+	);
 	const total = $derived((sites ?? []).reduce((n, s) => n + s.release_bytes, 0));
+	const domains = $derived((sites ?? []).reduce((n, s) => n + s.domains, 0));
+	const suspended = $derived((sites ?? []).filter((s) => s.disabled).length);
 
 	async function toggle(s: Site) {
 		if (!s.disabled) {
@@ -44,7 +53,7 @@
 <svelte:head><title>Sites · Administration · BotForge</title></svelte:head>
 
 <h2 class="text-section">Sites and domains</h2>
-<p class="mt-1 max-w-prose text-muted">Every hosted site on this panel. Suspending a site stops it from being served on all its addresses without deleting anything.</p>
+<p class="mt-1 max-w-3xl text-muted">Every hosted site on this panel. Suspending a site stops it from being served on all its addresses without deleting anything.</p>
 {#if error}<Notice tone="fail" class="mt-4">{error}</Notice>{/if}
 
 {#if info && !info.enabled}
@@ -54,12 +63,20 @@
 {:else if sites === null && !error}
 	<div class="mt-4"><Skeleton rows={3} /></div>
 {:else if sites}
-	<p class="mt-4 text-small text-muted">{sites.length} site{sites.length === 1 ? '' : 's'} · {fmtBytes(total)} served · addresses under <code>{info?.domain}</code></p>
-	<label class="relative mt-3 block max-w-sm">
-		<span class="sr-only">Search sites</span>
-		<Icon name="search" class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
-		<input class="field pl-8" type="search" placeholder="Search by name, owner or workspace" bind:value={q} />
-	</label>
+	<dl class="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+		{#each [['Sites', `${sites.length}`, `under ${info?.domain ?? ''}`], ['Served', fmtBytes(total), 'current releases'], ['Custom domains', `${domains}`, 'across all sites'], ['Suspended', `${suspended}`, suspended ? 'not being served' : 'none']] as [k, v, h] (k)}
+			<div class="stat"><dt class="eyebrow">{k}</dt><dd class="mt-1 font-mono text-title font-semibold">{v}</dd><dd class="truncate text-small text-muted" title={h}>{h}</dd></div>
+		{/each}
+	</dl>
+
+	<div class="mt-5 flex flex-wrap items-center gap-2">
+		<label class="relative min-w-0 flex-1 basis-60">
+			<span class="sr-only">Search sites</span>
+			<Icon name="search" class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
+			<input class="field pl-8" type="search" placeholder="Search by name, address, owner or workspace" bind:value={q} />
+		</label>
+		<select class="field w-auto" bind:value={served} aria-label="State"><option value="all">All sites</option><option value="live">Being served</option><option value="suspended">Suspended</option></select>
+	</div>
 	<div class="card mt-3 overflow-x-auto">
 		<table class="w-full min-w-[46rem] text-left">
 			<thead class="border-b border-rule-soft">
@@ -82,7 +99,7 @@
 						<td class="text-right"><button class="btn btn-sm {s.disabled ? '' : 'btn-danger'}" onclick={() => toggle(s)}>{s.disabled ? 'Restore' : 'Suspend'}</button></td>
 					</tr>
 				{:else}
-					<tr><td colspan="7" class="px-4 py-4 text-small text-muted">No sites{q ? ' match' : ' yet'}.</td></tr>
+					<tr><td colspan="7" class="px-4 py-4 text-small text-muted">No sites{q || served !== 'all' ? ' match' : ' yet'}.</td></tr>
 				{/each}
 			</tbody>
 		</table>

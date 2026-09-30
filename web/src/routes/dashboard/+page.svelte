@@ -446,7 +446,7 @@
 				{/each}
 			</ul>
 		{:else}
-		<ul class="border-y border-rule-soft bg-panel">
+		<ul class="overflow-hidden rounded-tile border border-rule-soft bg-panel">
 			{#each shown as b (b.id)}
 				{@const d = describe(b, now)}
 				<li class="spine grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-rule-soft py-3 pr-2 pl-5 last:border-b-0 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.6fr)_10rem_auto]" data-tone={d.tone} data-busy={d.busy}>
@@ -496,9 +496,9 @@
 
 <Dialog bind:open={batchOpen} title={batchResults ? 'Results' : `${batchAction === 'start' ? 'Start' : batchAction === 'stop' ? 'Stop' : 'Restart'} ${selectedBots.length} bot${selectedBots.length === 1 ? '' : 's'}?`} size="sm">
 	{#if batchResults}
-		<ul class="divide-y divide-rule-soft border-y border-rule-soft">
+		<ul class="list-card">
 			{#each batchResults as r (r.bot_id)}
-				<li class="flex items-baseline justify-between gap-3 py-1.5"><span class="min-w-0 truncate">{r.name}</span><span class="shrink-0 text-small {r.ok ? 'text-run' : 'text-fail'}">{r.ok ? 'Requested' : r.message}</span></li>
+				<li class="flex items-baseline justify-between gap-3 px-3 py-1.5"><span class="min-w-0 truncate">{r.name}</span><span class="shrink-0 text-small {r.ok ? 'text-run' : 'text-fail'}">{r.ok ? 'Requested' : r.message}</span></li>
 			{/each}
 		</ul>
 	{:else}

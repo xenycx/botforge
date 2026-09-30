@@ -30,7 +30,7 @@
 		{#if groups.length > 1}<div class="mt-3 flex gap-1 overflow-x-auto border-b border-rule-soft" role="tablist" aria-label="Dashboard sections">{#each groups as group}<button class="px-3 py-2 text-small font-medium {(active || groups[0]) === group ? 'border-b-2 border-action text-ink' : 'text-muted'}" role="tab" aria-selected={(active || groups[0]) === group} onclick={() => active=group}>{group}</button>{/each}</div>{/if}
 		<div class="mt-3 grid auto-rows-min gap-3 sm:grid-cols-2 xl:grid-cols-3">
 			{#each visible as w (w.key)}
-				<article class="min-w-0 border border-rule-soft bg-panel p-4 {spanClass(w)}" style:min-height={w.min_height ? `${w.min_height}px` : undefined}>
+				<article class="min-w-0 rounded-tile border border-rule-soft bg-panel p-4 {spanClass(w)}" style:min-height={w.min_height ? `${w.min_height}px` : undefined}>
 					<div class="flex items-center justify-between gap-2"><h3 class="truncate text-small font-medium text-muted">{w.title}</h3><span class="flex items-center gap-2">{#if w.stale}<span class="rounded-pill bg-warn/15 px-2 py-0.5 text-[11px] text-warn" title="This widget has not been refreshed for five minutes">Stale</span>{/if}{#if canAdmin && botId}<button class="text-[11px] text-muted hover:text-fail" onclick={() => remove(w)}>Remove</button>{/if}</span></div>
 					{#if w.kind === 'metric'}
 						<p class="mt-1 text-3xl font-semibold tabular-nums">{number(w.data.value).toLocaleString()} <span class="text-small font-normal text-muted">{text(w.data.unit)}</span></p>

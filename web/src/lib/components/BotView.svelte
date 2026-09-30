@@ -150,18 +150,24 @@
 {:else if !bot || !d}
 	{#if loadError}<Notice tone="fail">{loadError}</Notice>{:else}<Skeleton rows={4} label="Loading bot" />{/if}
 {:else}
-	<a href="/dashboard" class="inline-flex items-center gap-1 text-small text-muted hover:text-ink"><Icon name="chevronLeft" size={14} />Bots</a>
-
-	<header class="spine sticky top-0 z-20 -mx-4 mt-1 border-b border-rule-soft bg-paper/95 py-3 pr-4 pl-7 backdrop-blur-sm sm:mx-0 sm:pl-5" data-tone={d.tone} data-busy={d.busy}>
-		<div class="flex items-start gap-3">
-			<div class="min-w-0 flex-1">
-				<h1 class="truncate text-section sm:text-page">{bot.name}</h1>
-				<div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
-					<StatusBadge {bot} {now} />
-					{#if bot.shared}<span class="text-small text-muted">Shared with you</span>{/if}
+	<!-- One compact bar: identity, state, live usage and power stay in view
+	     under the top bar while the section below scrolls. -->
+	<header class="spine sticky top-16 z-20 -mx-4 border-b border-rule-soft bg-panel py-2.5 pr-3 pl-5 sm:mx-0 sm:overflow-hidden sm:rounded-tile sm:border sm:pr-3.5" data-tone={d.tone} data-busy={d.busy}>
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+			<div class="flex min-w-0 flex-1 basis-64 items-center gap-2">
+				<a href="/dashboard" class="btn btn-quiet btn-icon btn-sm shrink-0 text-muted" aria-label="Back to bots" title="Back to bots"><Icon name="chevronLeft" size={16} /></a>
+				<div class="min-w-0">
+					<div class="flex min-w-0 items-center gap-x-3">
+						<h1 class="truncate text-section">{bot.name}</h1>
+						<span class="shrink-0"><StatusBadge {bot} {now} size="sm" /></span>
+						{#if bot.shared}<span class="hidden shrink-0 text-small text-muted sm:inline">Shared with you</span>{/if}
+					</div>
+					<p class="truncate text-small text-muted" title="{bot.runtime}, {fmtBytes(bot.memory_bytes)} memory, {fmtCpu(bot.nano_cpus)}">
+						{bot.runtime} · {fmtBytes(bot.memory_bytes)} · {fmtCpu(bot.nano_cpus)}{#if bot.source_type === 'github'} · deployed from GitHub{/if}
+					</p>
 				</div>
-				{#if d.detail}<p class="mt-0.5 hidden max-w-3xl text-small sm:block {d.tone === 'fail' ? 'text-fail' : 'text-muted'}" aria-live="polite">{d.detail}</p>{/if}
 			</div>
+			{#if can(bot, Perm.console) && session.features.stats}<div class="hidden xl:block"><ResourceStrip botId={id} cpuLimit={bot.nano_cpus / 1e9} compact /></div>{/if}
 			{#if canPower}
 				<div class="flex shrink-0 items-center gap-1.5" role="group" aria-label="Power controls">
 					{#if settledIdle}
@@ -172,26 +178,22 @@
 					{:else}
 						<button class="btn btn-primary" disabled={acting} onclick={() => act('start')}><Icon name="play" size={12} />Start</button>
 					{/if}
-					<Menu label="More power actions" items={powerMenu} />
+					<Menu label="More power actions" items={powerMenu} fixed />
 				</div>
 			{/if}
 		</div>
+		{#if d.detail}<p class="mt-1 truncate pl-9 text-small {d.tone === 'fail' ? 'text-fail' : 'text-muted'}" title={d.detail} aria-live="polite">{d.detail}</p>{/if}
 	</header>
 
-	<div class="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-		<p class="text-small text-muted">
-			{bot.runtime}, {fmtBytes(bot.memory_bytes)} memory, {fmtCpu(bot.nano_cpus)}{#if bot.source_type === 'github'}, deployed from GitHub{/if}
-		</p>
-		{#if can(bot, Perm.console) && session.features.stats}<ResourceStrip botId={id} cpuLimit={bot.nano_cpus / 1e9} />{/if}
-	</div>
+	{#if can(bot, Perm.console) && session.features.stats}<div class="mt-3 xl:hidden"><ResourceStrip botId={id} cpuLimit={bot.nano_cpus / 1e9} /></div>{/if}
 	{#if loadError}<Notice tone="warn" class="mt-3">{loadError}</Notice>{/if}
 
-	<div class="mt-6 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:gap-8">
+	<div class="mt-5 lg:grid lg:grid-cols-[11.5rem_minmax(0,1fr)] lg:gap-8">
 		<nav class="hidden lg:block" aria-label="Bot sections">
-			<div class="sticky top-28 space-y-5">
+			<div class="sticky top-40 space-y-4">
 				{#each visibleGroups as g (g.label)}
 					<div>
-						<p class="eyebrow px-2 pb-1.5">{g.label}</p>
+						<p class="eyebrow px-2 pb-1">{g.label}</p>
 						<ul>
 							{#each g.items as s (s.id)}
 								<li>
@@ -199,7 +201,7 @@
 										href={sectionHref(s.id)}
 										data-sveltekit-noscroll
 										data-sveltekit-keepfocus
-										class="flex items-center gap-2.5 rounded-control px-2 py-1.5 {tab === s.id ? 'bg-panel font-medium text-ink shadow-[inset_3px_0_0_var(--color-action)]' : 'text-ink/75 hover:bg-panel/70 hover:text-ink'}"
+										class="flex items-center gap-2.5 rounded-control px-2 py-[5px] {tab === s.id ? 'bg-panel font-medium text-ink shadow-[inset_3px_0_0_var(--color-action)]' : 'text-ink/75 hover:bg-panel/70 hover:text-ink'}"
 										aria-current={tab === s.id ? 'page' : undefined}
 									>
 										<Icon name={s.icon} class={tab === s.id ? 'text-action' : 'text-muted'} />{s.label}

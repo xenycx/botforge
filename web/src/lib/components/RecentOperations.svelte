@@ -43,7 +43,7 @@
 	{:else if ops.length === 0}
 		<p class="mt-2 text-muted">Builds, deployments, backups and restores appear here once they run.</p>
 	{:else}
-		<ul class="mt-2 border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+		<ul class="mt-2 list-card">
 			{#each ops as op (op.id)}
 				<OperationRow {op} {now} {canOutput} initiallyOpen={op.id === openFirst} />
 			{/each}

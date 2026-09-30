@@ -136,7 +136,7 @@
 			<p>Starting a bot runs its build; deployments, backups and restores are recorded as they happen.</p>
 		</EmptyState>
 	{:else}
-		<ul class="border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+		<ul class="list-card">
 			{#each ops as op (op.id)}
 				<OperationRow {op} {now} showBot={!botF} canOutput={canOutput(op)} />
 			{/each}

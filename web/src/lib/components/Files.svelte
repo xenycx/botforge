@@ -28,6 +28,32 @@
 	let host: HTMLDivElement | undefined = $state();
 	let editor: EditorHandle | null = null;
 
+	// Workbench layout: the explorer can fold away and the whole panel can fill
+	// the window for longer editing sessions. Both are remembered per browser.
+	function pref(key: string) {
+		try {
+			return localStorage.getItem(key) === '1';
+		} catch {
+			return false;
+		}
+	}
+	function setPref(key: string, on: boolean) {
+		try {
+			localStorage.setItem(key, on ? '1' : '0');
+		} catch {
+			/* the preference is optional */
+		}
+	}
+	let treeHidden = $state(pref('botforge.filesTreeHidden'));
+	let focusMode = $state(false);
+	function toggleTree() {
+		treeHidden = !treeHidden;
+		setPref('botforge.filesTreeHidden', treeHidden);
+	}
+	function onWindowKey(e: KeyboardEvent) {
+		if (e.key === 'Escape' && focusMode && !(e.target as HTMLElement | null)?.closest?.('.cm-editor, [role=menu], dialog')) focusMode = false;
+	}
+
 	type Upload = { name: string; progress: number; error?: string; ctrl: AbortController };
 	let uploads = $state<Upload[]>([]);
 
@@ -281,107 +307,140 @@
 	const icon = (e: FileEntry) => (e.type === 'dir' ? 'folder' : e.type === 'symlink' ? 'link' : 'file');
 </script>
 
-<!-- Explorer and editor side by side from lg up; one at a time on narrow screens. -->
-<div class="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-	<div class="min-w-0 {open ? 'hidden lg:block' : ''}">
-		<div class="flex flex-wrap items-center gap-1.5">
-			<button class="btn btn-sm" onclick={newFile}><Icon name="plus" size={14} />File</button>
-			<button class="btn btn-sm" onclick={newFolder}><Icon name="folder" size={14} />Folder</button>
-			<label class="btn btn-sm cursor-pointer focus-within:outline-2 focus-within:outline-action"><Icon name="upload" size={14} />Upload<input type="file" multiple class="sr-only" onchange={uploadFiles} /></label>
-			<label class="btn btn-sm cursor-pointer focus-within:outline-2 focus-within:outline-action" title="Extracts into the current folder"><Icon name="archive" size={14} />Zip<input type="file" accept=".zip,application/zip" class="sr-only" onchange={uploadZip} /></label>
+<svelte:window onkeydown={onWindowKey} />
+
+<!-- A workbench: explorer and editor side by side in one panel sized to the
+     window from lg up; one at a time on narrow screens. Focus mode lifts the
+     panel over the whole page. -->
+<div
+	class="flex min-w-0 flex-col overflow-hidden border border-rule-soft bg-panel {focusMode
+		? 'fixed inset-2 z-50 rounded-card shadow-overlay sm:inset-4'
+		: 'rounded-tile lg:h-[max(30rem,calc(100dvh-12rem))]'}"
+	role={focusMode ? 'dialog' : undefined}
+	aria-label={focusMode ? 'Files, full screen' : undefined}
+>
+	<div class="grid min-h-0 flex-1 {treeHidden ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[17rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]'}">
+		<!-- Explorer -->
+		<div class="min-h-0 min-w-0 flex-col border-rule-soft lg:border-r {open ? 'hidden' : 'flex'} {treeHidden ? 'lg:hidden' : 'lg:flex'}">
+			<div class="flex items-center gap-1 border-b border-rule-soft px-2 py-1.5">
+				<p class="eyebrow flex-1 truncate px-1">Explorer</p>
+				<button class="btn btn-sm btn-quiet btn-icon" onclick={newFile} aria-label="New file" title="New file"><Icon name="plus" size={15} /></button>
+				<button class="btn btn-sm btn-quiet btn-icon" onclick={newFolder} aria-label="New folder" title="New folder"><Icon name="folder" size={15} /></button>
+				<label class="btn btn-sm btn-quiet btn-icon cursor-pointer focus-within:outline-2 focus-within:outline-action" title="Upload files"><Icon name="upload" size={15} /><span class="sr-only">Upload files</span><input type="file" multiple class="sr-only" onchange={uploadFiles} /></label>
+				<label class="btn btn-sm btn-quiet btn-icon cursor-pointer focus-within:outline-2 focus-within:outline-action" title="Upload a zip and extract it into this folder"><Icon name="archive" size={15} /><span class="sr-only">Upload a zip</span><input type="file" accept=".zip,application/zip" class="sr-only" onchange={uploadZip} /></label>
+			</div>
+
+			<nav class="flex min-w-0 flex-wrap items-center gap-0.5 px-2 pt-2 text-small" aria-label="Folder">
+				<button class="rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {cwd ? 'text-action' : 'font-semibold'}" onclick={() => list('')} aria-current={cwd ? undefined : 'location'}>workspace</button>
+				{#each crumbs as c, i (c.path)}
+					<Icon name="chevronRight" size={12} class="text-muted" />
+					<button class="max-w-40 truncate rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {i === crumbs.length - 1 ? 'font-semibold' : 'text-action'}" onclick={() => list(c.path)} aria-current={i === crumbs.length - 1 ? 'location' : undefined}>{c.name}</button>
+				{/each}
+			</nav>
+			{#if (entries?.length ?? 0) > 8}
+				<label class="relative mx-2 mt-2 block">
+					<span class="sr-only">Filter this folder</span>
+					<Icon name="search" size={14} class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
+					<input class="field pl-8 text-small" type="search" placeholder="Filter this folder" bind:value={filter} />
+				</label>
+			{/if}
+			{#if listError}<Notice tone="fail" class="mx-2 mt-2">{listError}</Notice>{/if}
+
+			{#if uploads.length}
+				<ul class="mx-2 mt-2 space-y-1.5 rounded-control border border-rule-soft bg-paper p-2 text-small" aria-label="Uploads">
+					{#each uploads as u, i (i)}
+						<li>
+							<div class="flex items-center gap-2">
+								<span class="min-w-0 flex-1 truncate">{u.name}</span>
+								{#if u.error}<span class="text-fail">{u.error}</span>{:else if u.progress < 1}<button class="text-action underline" onclick={() => u.ctrl.abort()}>Cancel</button>{:else}<Icon name="check" size={13} class="text-run" />{/if}
+							</div>
+							{#if !u.error}<div class="mt-1 h-1 overflow-hidden rounded-pill bg-paper-2"><div class="h-1 bg-action" style="width: {Math.round(u.progress * 100)}%"></div></div>{/if}
+						</li>
+					{/each}
+					{#if uploads.every((u) => u.error || u.progress >= 1)}<li><button class="text-action underline" onclick={() => (uploads = [])}>Clear</button></li>{/if}
+				</ul>
+			{/if}
+
+			<ul class="mt-1.5 max-h-[60dvh] min-h-40 flex-1 overflow-auto px-1.5 pb-2 lg:max-h-none">
+				{#if cwd}
+					<li><button class="flex w-full items-center gap-2 rounded-control px-2 py-1 text-left text-muted hover:bg-paper-2" onclick={() => list(cwd.includes('/') ? cwd.slice(0, cwd.lastIndexOf('/')) : '')}><Icon name="chevronLeft" size={14} />Up one folder</button></li>
+				{/if}
+				{#if entries === null && !listError}
+					<li class="px-2 py-3 text-muted">Loading…</li>
+				{:else}
+					{#each shownEntries as en (en.name)}
+						{@const p = join(cwd, en.name)}
+						<li class="group flex items-center rounded-control {open === p ? 'bg-action/10 text-ink' : 'hover:bg-paper-2/60'}">
+							{#if en.type === 'dir'}
+								<button class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-left font-medium" onclick={() => list(p)}><Icon name="folder" size={15} class="text-muted" /><span class="truncate">{en.name}</span></button>
+							{:else if en.type === 'symlink'}
+								<span class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-muted" title="Links are not followed"><Icon name="link" size={15} /><span class="truncate">{en.name}</span></span>
+							{:else}
+								<button class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-left" onclick={() => openFile(p)} aria-current={open === p ? 'true' : undefined}><Icon name={icon(en)} size={15} class={open === p ? 'text-action' : 'text-muted'} /><span class="truncate">{en.name}</span></button>
+								<span class="shrink-0 px-1 text-small text-muted tabular-nums">{fmtBytes(en.size)}</span>
+							{/if}
+							<Menu
+								label="Actions for {en.name}"
+								fixed
+								items={[
+									...(en.type === 'file' ? [{ label: 'Download', onselect: () => window.open(`/api/v1${base(botId)}/content?path=${q(p)}&download=1`, '_self') }] : []),
+									{ label: 'Rename', onselect: () => rename(en) },
+									'separator',
+									{ label: 'Delete', danger: true, onselect: () => remove(en) }
+								]}
+							/>
+						</li>
+					{:else}
+						<li class="px-2 py-5 text-muted">
+							{#if filter}No names match “{filter}”.{:else}This folder is empty. Upload your code, create a file, or deploy a repository under Deployments.{/if}
+						</li>
+					{/each}
+				{/if}
+			</ul>
 		</div>
 
-		<nav class="mt-3 flex min-w-0 flex-wrap items-center gap-0.5 text-small" aria-label="Folder">
-			<button class="rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {cwd ? 'text-action' : 'font-semibold'}" onclick={() => list('')} aria-current={cwd ? undefined : 'location'}>workspace</button>
-			{#each crumbs as c, i (c.path)}
-				<Icon name="chevronRight" size={12} class="text-muted" />
-				<button class="max-w-40 truncate rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {i === crumbs.length - 1 ? 'font-semibold' : 'text-action'}" onclick={() => list(c.path)} aria-current={i === crumbs.length - 1 ? 'location' : undefined}>{c.name}</button>
-			{/each}
-		</nav>
-		{#if (entries?.length ?? 0) > 8}
-			<label class="relative mt-2 block">
-				<span class="sr-only">Filter this folder</span>
-				<Icon name="search" size={14} class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
-				<input class="field pl-8 text-small" type="search" placeholder="Filter this folder" bind:value={filter} />
-			</label>
-		{/if}
-		{#if listError}<Notice tone="fail" class="mt-2">{listError}</Notice>{/if}
-
-		{#if uploads.length}
-			<ul class="mt-2 space-y-1.5 border border-rule-soft bg-panel p-2 text-small" aria-label="Uploads">
-				{#each uploads as u, i (i)}
-					<li>
-						<div class="flex items-center gap-2">
-							<span class="min-w-0 flex-1 truncate">{u.name}</span>
-							{#if u.error}<span class="text-fail">{u.error}</span>{:else if u.progress < 1}<button class="text-action underline" onclick={() => u.ctrl.abort()}>Cancel</button>{:else}<Icon name="check" size={13} class="text-run" />{/if}
-						</div>
-						{#if !u.error}<div class="mt-1 h-1 bg-paper-2"><div class="h-1 bg-action" style="width: {Math.round(u.progress * 100)}%"></div></div>{/if}
-					</li>
-				{/each}
-				{#if uploads.every((u) => u.error || u.progress >= 1)}<li><button class="text-action underline" onclick={() => (uploads = [])}>Clear</button></li>{/if}
-			</ul>
-		{/if}
-
-		<ul class="mt-2 max-h-[calc(100dvh-20rem)] min-h-40 overflow-auto border-y border-rule-soft">
-			{#if cwd}
-				<li><button class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-muted hover:bg-paper-2" onclick={() => list(cwd.includes('/') ? cwd.slice(0, cwd.lastIndexOf('/')) : '')}><Icon name="chevronLeft" size={14} />Up one folder</button></li>
-			{/if}
-			{#if entries === null && !listError}
-				<li class="px-2 py-3 text-muted">Loading…</li>
-			{:else}
-				{#each shownEntries as en (en.name)}
-					{@const p = join(cwd, en.name)}
-					<li class="flex items-center {open === p ? 'bg-panel shadow-[inset_3px_0_0_var(--color-action)]' : 'hover:bg-paper-2/60'}">
-						{#if en.type === 'dir'}
-							<button class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left font-medium" onclick={() => list(p)}><Icon name="folder" size={15} class="text-muted" /><span class="truncate">{en.name}</span></button>
-						{:else if en.type === 'symlink'}
-							<span class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-muted" title="Links are not followed"><Icon name="link" size={15} /><span class="truncate">{en.name}</span></span>
-						{:else}
-							<button class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left" onclick={() => openFile(p)} aria-current={open === p ? 'true' : undefined}><Icon name={icon(en)} size={15} class="text-muted" /><span class="truncate">{en.name}</span></button>
-							<span class="shrink-0 px-1 text-small text-muted tabular-nums">{fmtBytes(en.size)}</span>
-						{/if}
-						<Menu
-							label="Actions for {en.name}"
-							items={[
-								...(en.type === 'file' ? [{ label: 'Download', onselect: () => window.open(`/api/v1${base(botId)}/content?path=${q(p)}&download=1`, '_self') }] : []),
-								{ label: 'Rename', onselect: () => rename(en) },
-								'separator',
-								{ label: 'Delete', danger: true, onselect: () => remove(en) }
-							]}
-						/>
-					</li>
-				{:else}
-					<li class="px-2 py-5 text-muted">
-						{#if filter}No names match “{filter}”.{:else}This folder is empty. Upload your code, create a file, or deploy a repository under Deployments.{/if}
-					</li>
-				{/each}
-			{/if}
-		</ul>
-	</div>
-
-	<div class="min-w-0 {open ? '' : 'hidden lg:block'}">
-		{#if open}
-			<div class="flex flex-wrap items-center gap-2 pb-2">
+		<!-- Editor -->
+		<div class="flex min-h-0 min-w-0 flex-col {open ? '' : 'hidden lg:flex'}">
+			<div class="flex min-h-11 items-center gap-1.5 border-b border-rule-soft px-2 py-1.5">
 				<button class="btn btn-sm btn-quiet lg:hidden" onclick={closeFile}><Icon name="chevronLeft" size={14} />Files</button>
-				<div class="min-w-0 flex-1">
-					<p class="truncate font-mono text-small font-medium" title={open}>{open}</p>
-					<p class="text-small text-muted" aria-live="polite">{language}{#if !notEditable}, {saving ? 'saving…' : dirty ? 'unsaved changes' : 'saved'}{/if}</p>
-				</div>
-				<a class="btn btn-sm" href="/api/v1{base(botId)}/content?path={q(open)}&download=1" download><Icon name="download" size={14} />Download</a>
-				{#if !notEditable}<button class="btn btn-sm btn-primary" onclick={() => save()} disabled={!dirty || saving} title="Save (Ctrl+S)">Save</button>{/if}
+				<button class="btn btn-sm btn-quiet btn-icon hidden lg:inline-flex" onclick={toggleTree} aria-label={treeHidden ? 'Show the file explorer' : 'Hide the file explorer'} aria-pressed={!treeHidden} title={treeHidden ? 'Show explorer' : 'Hide explorer'}><Icon name="panel" size={15} /></button>
+				{#if open}
+					<p class="min-w-0 flex-1 truncate font-mono text-small font-medium" title={open}>
+						{open}{#if dirty}<span class="ml-1.5 inline-block size-2 rounded-pill bg-action align-middle" aria-hidden="true"></span>{/if}
+					</p>
+					<a class="btn btn-sm btn-quiet btn-icon" href="/api/v1{base(botId)}/content?path={q(open)}&download=1" download aria-label="Download {open}" title="Download"><Icon name="download" size={15} /></a>
+				{:else}
+					<p class="min-w-0 flex-1 truncate text-small text-muted">No file open</p>
+				{/if}
+				<button class="btn btn-sm btn-quiet btn-icon hidden lg:inline-flex" onclick={() => (focusMode = !focusMode)} aria-label={focusMode ? 'Leave full screen' : 'Full screen'} aria-pressed={focusMode} title={focusMode ? 'Leave full screen (Esc)' : 'Full screen'}><Icon name={focusMode ? 'minimize' : 'maximize'} size={15} /></button>
+				{#if open && !notEditable}<button class="btn btn-sm btn-primary" onclick={() => save()} disabled={!dirty || saving} title="Save (Ctrl+S)">Save</button>{/if}
 			</div>
-			{#if saveError}<Notice tone="fail" class="mb-2" live>{saveError}{#snippet action()}<button class="btn btn-sm" onclick={() => save()}>Try again</button>{/snippet}</Notice>{/if}
-			{#if notEditable}
-				<div class="border border-dashed border-rule p-6 text-muted">{notEditable}</div>
+			{#if saveError}<Notice tone="fail" class="m-2" live>{saveError}{#snippet action()}<button class="btn btn-sm" onclick={() => save()}>Try again</button>{/snippet}</Notice>{/if}
+			{#if open}
+				{#if notEditable}
+					<div class="m-3 rounded-tile border border-dashed border-rule p-6 text-muted">{notEditable}</div>
+				{:else}
+					{#if loadingFile}<p class="px-3 py-2 text-muted">Opening…</p>{/if}
+					<div bind:this={host} class="h-[max(24rem,calc(100dvh-16rem))] min-h-0 overflow-hidden lg:h-auto lg:flex-1"></div>
+				{/if}
 			{:else}
-				{#if loadingFile}<p class="py-2 text-muted">Opening…</p>{/if}
-				<div bind:this={host} class="h-[max(22rem,calc(100dvh-22rem))] overflow-hidden border border-rule-soft"></div>
-				{#if running && !dirty}<p class="mt-2 text-small text-muted">Saved changes apply after the bot restarts.</p>{/if}
+				<div class="grid flex-1 place-items-center p-6 text-center text-muted">
+					<div>
+						<Icon name="code" size={28} class="mx-auto text-rule" />
+						<p class="mt-3">Choose a file to edit it here.</p>
+						<p class="mt-1 text-small">Press <kbd class="copyable">Ctrl</kbd> + <kbd class="copyable">S</kbd> to save; changes apply the next time the bot starts.</p>
+					</div>
+				</div>
 			{/if}
-		{:else}
-			<div class="grid h-full min-h-60 place-items-center border border-dashed border-rule p-6 text-center text-muted">
-				<p>Choose a file to edit it here.<br />Press Ctrl+S to save; changes apply the next time the bot starts.</p>
+			<div class="flex items-center gap-3 border-t border-rule-soft px-3 py-1 text-[12px] text-muted" aria-live="polite">
+				{#if open && !notEditable}
+					<span>{language}</span>
+					<span>{saving ? 'Saving…' : dirty ? 'unsaved changes' : 'saved'}</span>
+				{/if}
+				<span class="flex-1"></span>
+				{#if running}<span>Saved changes apply after a restart</span>{:else}<span class="hidden sm:inline">Ctrl+S saves</span>{/if}
 			</div>
-		{/if}
+		</div>
 	</div>
 </div>
+{#if focusMode}<div class="fixed inset-0 z-40 bg-black/50" role="presentation" onclick={() => (focusMode = false)}></div>{/if}

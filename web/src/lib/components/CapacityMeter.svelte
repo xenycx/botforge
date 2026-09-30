@@ -8,7 +8,7 @@
 <div class="min-w-0">
 	<div class="flex items-baseline justify-between gap-2">
 		<span class="eyebrow">{label}</span>
-		<span class="font-mono text-small"><span class="font-medium text-ink">{format(value)}</span><span class="text-muted"> / {max > 0 ? format(max) : 'no limit'}</span></span>
+		<span class="font-mono text-small"><span class="font-medium text-ink">{format(value)}</span><span class="text-muted">&nbsp;/ {max > 0 ? format(max) : 'no limit'}</span></span>
 	</div>
 	{#if max > 0}
 		<div class="mt-1.5 h-1.5 overflow-hidden rounded-pill bg-rule-soft" role="meter" aria-label={label} aria-valuemin="0" aria-valuemax={max} aria-valuenow={value}>

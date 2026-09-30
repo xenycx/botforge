@@ -27,8 +27,9 @@
 	label="Switch workspace"
 	align="start"
 	class={compact ? '' : 'w-full'}
-	menuClass={compact ? 'min-w-60' : 'w-full'}
+	menuClass={compact ? 'w-64' : ''}
 	fixed={compact}
+	side={compact}
 	triggerClass={compact
 		? 'grid size-10 place-items-center rounded-tile border border-rule-soft bg-raised text-action hover:border-rule'
 		: 'flex w-full items-center gap-2.5 rounded-tile border border-rule-soft bg-raised px-2.5 py-2 text-left transition-colors hover:border-rule'}

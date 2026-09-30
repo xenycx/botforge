@@ -18,6 +18,7 @@
 		triggerClass = '',
 		menuClass = '',
 		fixed = false,
+		side = false,
 		trigger
 	}: {
 		items: MenuItem[];
@@ -30,6 +31,8 @@
 		menuClass?: string;
 		/** Position against the viewport, for triggers inside narrow scrolling containers that would clip the list. */
 		fixed?: boolean;
+		/** With fixed: open beside the trigger (a flyout from a narrow rail) instead of below it. */
+		side?: boolean;
 		trigger?: Snippet;
 	} = $props();
 
@@ -46,11 +49,26 @@
 		els[n].focus();
 	}
 	let at = $state('');
-	async function show() {
-		if (fixed && btn) {
-			const r = btn.getBoundingClientRect();
-			at = `position: fixed; top: ${Math.round(r.bottom + 4)}px; left: ${Math.round(align === 'end' ? r.right : r.left)}px;${align === 'end' ? ' transform: translateX(-100%);' : ''}`;
+	// Viewport positioning, chosen on open: always when asked for, and whenever
+	// an ancestor clips its overflow (rounded lists, scroll panes), where an
+	// absolutely placed list would be cut off.
+	let floating = $state(false);
+	function clipped(el: HTMLElement) {
+		for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+			const cs = getComputedStyle(p);
+			if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') return true;
 		}
+		return false;
+	}
+	function place() {
+		if (!btn) return;
+		const r = btn.getBoundingClientRect();
+		if (side) at = `position: fixed; top: ${Math.round(r.top)}px; left: ${Math.round(r.right + 10)}px;`;
+		else at = `position: fixed; top: ${Math.round(r.bottom + 4)}px; ${align === 'end' ? `right: ${Math.round(document.documentElement.clientWidth - r.right)}px` : `left: ${Math.round(r.left)}px`}; min-width: ${Math.round(r.width)}px;`;
+	}
+	async function show() {
+		floating = fixed || (!!btn && clipped(btn));
+		if (floating) place();
 		open = true;
 		await Promise.resolve();
 		focusItem('first');
@@ -82,7 +100,8 @@
 	}
 </script>
 
-<svelte:window onpointerdown={outside} />
+<svelte:window onpointerdown={outside} onresize={() => floating && open && place()} />
+<svelte:document onscrollcapture={() => floating && open && place()} />
 
 <div class="relative inline-block {cls}">
 	<button
@@ -109,8 +128,8 @@
 			role="menu"
 			tabindex="-1"
 			aria-label={label}
-			class="{fixed ? 'z-50' : 'absolute top-full z-40 mt-1'} max-h-[70vh] min-w-48 animate-enter overflow-y-auto rounded-overlay border border-rule-soft bg-raised py-1 shadow-overlay {fixed ? '' : align === 'end' ? 'right-0' : 'left-0'} {menuClass}"
-			style={fixed ? at : undefined}
+			class="{floating ? 'z-50' : 'absolute top-full z-40 mt-1'} max-h-[70vh] min-w-48 animate-enter overflow-y-auto rounded-overlay border border-rule-soft bg-raised py-1 shadow-overlay {floating ? '' : align === 'end' ? 'right-0' : 'left-0'} {menuClass}"
+			style={floating ? at : undefined}
 			onkeydown={onkey}
 		>
 			{#each items as it, i (i)}

@@ -207,49 +207,51 @@
 	{#if vars === null && !error}
 		<Skeleton rows={3} label="Loading variables" />
 	{:else if vars}
-		<table class="w-full border-y border-rule-soft">
-			<thead class="hidden text-left text-small text-muted md:table-header-group">
-				<tr class="border-b border-rule-soft"><th class="py-2 pl-2 font-medium">Name</th><th class="py-2 font-medium">Value</th><th class="py-2 font-medium">Changed</th><th><span class="sr-only">Actions</span></th></tr>
-			</thead>
-			<tbody class="divide-y divide-rule-soft">
-				{#each userVars as v (v.name)}
-					<tr class="block py-2 md:table-row md:py-0">
-						<td class="block px-2 md:table-cell md:py-2.5"><code class="font-medium break-all">{v.name}</code>{#if hint(v.name)}<span class="ml-2 text-small text-muted">{hint(v.name)?.label}</span>{/if}</td>
-						<td class="block px-2 md:table-cell md:w-[45%] md:py-2.5">
-							{#if v.name in editing}
-								<label><span class="sr-only">New value of {v.name}</span><input class="field font-mono text-small" type={secretLike(v.name) ? 'password' : 'text'} bind:value={editing[v.name]} autocomplete="off" spellcheck="false" /></label>
-							{:else if v.name in revealed}
-								<code class="block max-h-24 overflow-auto text-small break-all whitespace-pre-wrap">{revealed[v.name] || '(empty)'}</code>
-							{:else}
-								<span class="font-mono text-small text-muted" aria-label="hidden value">••••••••</span>
-							{/if}
-						</td>
-						<td class="hidden text-small text-muted md:table-cell md:py-2.5">{fmtAgo(v.updated_at_ms)}</td>
-						<td class="block px-2 md:table-cell md:py-2 md:text-right">
-							<span class="mt-1 inline-flex gap-1 md:mt-0">
+		<div class="card overflow-hidden">
+			<table class="w-full">
+				<thead class="hidden text-left text-small text-muted md:table-header-group">
+					<tr class="border-b border-rule-soft"><th class="py-2 pl-3 font-medium">Name</th><th class="py-2 font-medium">Value</th><th class="py-2 font-medium">Changed</th><th><span class="sr-only">Actions</span></th></tr>
+				</thead>
+				<tbody class="divide-y divide-rule-soft">
+					{#each userVars as v (v.name)}
+						<tr class="block py-2 md:table-row md:py-0">
+							<td class="block px-3 md:table-cell md:py-2.5"><code class="font-medium break-all">{v.name}</code>{#if hint(v.name)}<span class="ml-2 text-small text-muted">{hint(v.name)?.label}</span>{/if}</td>
+							<td class="block px-3 md:table-cell md:w-[45%] md:py-2.5">
 								{#if v.name in editing}
-									<button class="btn btn-sm btn-primary" onclick={() => saveEdit(v.name)}>Save</button>
-									<button class="btn btn-sm" onclick={() => { delete editing[v.name]; hide(v.name); }}>Cancel</button>
+									<label><span class="sr-only">New value of {v.name}</span><input class="field font-mono text-small" type={secretLike(v.name) ? 'password' : 'text'} bind:value={editing[v.name]} autocomplete="off" spellcheck="false" /></label>
+								{:else if v.name in revealed}
+									<code class="block max-h-24 overflow-auto text-small break-all whitespace-pre-wrap">{revealed[v.name] || '(empty)'}</code>
 								{:else}
-									<button class="btn btn-sm btn-quiet" onclick={() => reveal(v.name)} aria-pressed={v.name in revealed} aria-label="{v.name in revealed ? 'Hide' : 'Reveal'} {v.name}"><Icon name={v.name in revealed ? 'eyeOff' : 'eye'} size={14} />{v.name in revealed ? 'Hide' : 'Reveal'}</button>
-									<button class="btn btn-sm btn-quiet" onclick={() => startEdit(v.name)} disabled={running} aria-label="Edit {v.name}"><Icon name="pencil" size={14} />Edit</button>
-									<button class="btn btn-sm btn-quiet text-fail" onclick={() => remove(v.name)} disabled={running} aria-label="Remove {v.name}"><Icon name="trash" size={14} /></button>
+									<span class="font-mono text-small text-muted" aria-label="hidden value">••••••••</span>
 								{/if}
-							</span>
-						</td>
-					</tr>
-				{:else}
-					<tr><td colspan="4" class="px-2 py-5 text-muted">{search ? `No variable names contain “${search}”.` : 'No variables yet. Add DISCORD_TOKEN, or whatever your code reads from its environment.'}</td></tr>
-				{/each}
-			</tbody>
-		</table>
+							</td>
+							<td class="hidden text-small text-muted md:table-cell md:py-2.5">{fmtAgo(v.updated_at_ms)}</td>
+							<td class="block px-3 md:table-cell md:py-2 md:pr-3 md:text-right">
+								<span class="mt-1 inline-flex gap-1 md:mt-0">
+									{#if v.name in editing}
+										<button class="btn btn-sm btn-primary" onclick={() => saveEdit(v.name)}>Save</button>
+										<button class="btn btn-sm" onclick={() => { delete editing[v.name]; hide(v.name); }}>Cancel</button>
+									{:else}
+										<button class="btn btn-sm btn-quiet" onclick={() => reveal(v.name)} aria-pressed={v.name in revealed} aria-label="{v.name in revealed ? 'Hide' : 'Reveal'} {v.name}"><Icon name={v.name in revealed ? 'eyeOff' : 'eye'} size={14} />{v.name in revealed ? 'Hide' : 'Reveal'}</button>
+										<button class="btn btn-sm btn-quiet" onclick={() => startEdit(v.name)} disabled={running} aria-label="Edit {v.name}"><Icon name="pencil" size={14} />Edit</button>
+										<button class="btn btn-sm btn-quiet text-fail" onclick={() => remove(v.name)} disabled={running} aria-label="Remove {v.name}"><Icon name="trash" size={14} /></button>
+									{/if}
+								</span>
+							</td>
+						</tr>
+					{:else}
+						<tr><td colspan="4" class="px-3 py-5 text-muted">{search ? `No variable names contain “${search}”.` : 'No variables yet. Add DISCORD_TOKEN, or whatever your code reads from its environment.'}</td></tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 
 		{#if systemVars.length}
 			<h3 class="mt-6 text-title font-semibold">Managed by the panel</h3>
 			<p class="text-small text-muted">Set automatically (for example by Analytics). They cannot be edited here.</p>
-			<ul class="mt-2 divide-y divide-rule-soft border-y border-rule-soft">
+			<ul class="mt-2 list-card">
 				{#each systemVars as v (v.name)}
-					<li class="flex flex-wrap items-center gap-2 px-2 py-2">
+					<li class="flex flex-wrap items-center gap-2 px-3 py-2">
 						<code class="min-w-0 flex-1 text-small break-all">{v.name}</code>
 						{#if v.name in revealed}<code class="text-small break-all">{revealed[v.name]}</code>{/if}
 						<button class="btn btn-sm btn-quiet" onclick={() => reveal(v.name)}>{v.name in revealed ? 'Hide' : 'Reveal'}</button>
@@ -287,9 +289,9 @@
 	{#if importStep === 'paste'}
 		<label class="block"><span class="sr-only">.env contents</span><textarea class="field h-48 font-mono text-small" bind:value={importText} spellcheck="false" placeholder={'DISCORD_TOKEN=abc\nPREFIX="!"'}></textarea></label>
 	{:else}
-		<ul class="divide-y divide-rule-soft border-y border-rule-soft">
+		<ul class="list-card">
 			{#each parsedNames as n (n)}
-				<li class="flex items-center justify-between gap-3 py-1.5">
+				<li class="flex items-center justify-between gap-3 px-3 py-1.5">
 					<code class="break-all">{n}</code>
 					<span class="shrink-0 text-small {reserved.includes(n) ? 'text-fail' : vars?.some((v) => v.name === n) ? 'text-warn' : 'text-run'}">{reserved.includes(n) ? 'Reserved, skipped' : vars?.some((v) => v.name === n) ? 'Replaces current value' : 'New'}</span>
 				</li>
