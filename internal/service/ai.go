@@ -1017,7 +1017,7 @@ func (s *AIService) finishRun(r *domain.AIRun, status, code, msg string) {
 		r.ErrorMessage = &msg
 	}
 	_ = s.Store.UpdateAIRun(context.Background(), *r)
-	s.emit(r.ID, map[string]string{"completed": "done", "cancelled": "cancelled"}[status], map[string]any{"status": status, "error_code": code, "message": msg})
+	s.emit(r.ID, map[string]string{"completed": "done", "cancelled": "cancelled", "failed": "error"}[status], map[string]any{"status": status, "error_code": code, "message": msg})
 	s.mu.Lock()
 	delete(s.cancels, r.ID)
 	s.mu.Unlock()

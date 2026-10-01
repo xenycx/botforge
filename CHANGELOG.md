@@ -96,6 +96,8 @@ authoritative current version.
 
 ### Fixed
 
+- A failed AI run now ends its live stream with an error event, so the
+  workspace no longer shows the run as still working.
 - AI provider error codes (for example rate-limit or authentication codes)
   are now read from provider responses instead of being lost.
 - The session cap could evict the newest session instead of the oldest when

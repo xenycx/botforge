@@ -34,13 +34,19 @@ items state exactly what remains.
 - [x] Settings redesign (side-by-side sections, sticky navigation, folded
   password form), themed checkboxes/radios, accent-aware dark glows, and a
   corner-style preference including a fully square mode.
-- [x] Target-scoped AI operator with encrypted OpenAI-compatible providers,
+- [~] Target-scoped AI operator with encrypted OpenAI-compatible providers,
   private 90-day conversations, streamed tool records, Approval/Auto envelopes,
   Risa/SearxNG research, secret redaction, revision-checked journaled changes
   and undo, and direct-argv offline diagnostics. Enforcement: RBAC, approvals,
   limits, protected paths and SSRF checks are application-level; resource,
   mount, capability and network isolation are Docker-runtime-level. The
   separate privileged `botrunner` daemon is not implemented (`docs/ai-operator.md`).
+  Not yet enforced or missing: Auto-mode limits other than rounds and wall
+  time (diagnostics, applies, lifecycle actions, changed files/bytes, retained
+  output); audit records for actions the model takes without a request in Auto
+  mode; DNS-rebinding-safe fetching (IPs are checked before, not at, connect);
+  startup, deploy and site-publish tools; run/tool/change-set history after a
+  page reload; and full provider editing in the settings UI.
 
 Migrations added since 0.2.0 (the schema-version assertion in
 `internal/store/sqlite/db_test.go` is 28):

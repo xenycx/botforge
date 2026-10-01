@@ -104,8 +104,8 @@ func parseProviderError(resp *http.Response) error {
 	msg := strings.TrimSpace(string(b))
 	var v struct {
 		Error struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
+			Message string          `json:"message"`
+			Code    json.RawMessage `json:"code"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(b, &v) == nil && v.Error.Message != "" {
@@ -114,17 +114,18 @@ func parseProviderError(resp *http.Response) error {
 	if msg == "" {
 		msg = http.StatusText(resp.StatusCode)
 	}
-	code := v.Error.Code
-	if code == "" {
-		switch resp.StatusCode {
-		case 401:
-			code = "authentication"
-		case 402:
+	// The HTTP status decides the category; provider codes differ between
+	// vendors and may be strings, numbers or null.
+	code := "provider"
+	switch resp.StatusCode {
+	case 401, 403:
+		code = "authentication"
+	case 402:
+		code = "balance"
+	case 429:
+		code = "rate_limit"
+		if strings.Contains(string(v.Error.Code), "insufficient_quota") {
 			code = "balance"
-		case 429:
-			code = "rate_limit"
-		default:
-			code = "provider"
 		}
 	}
 	var retry time.Duration
