@@ -21,6 +21,7 @@
 	let line = $state('');
 	let paused = $state(false);
 	let dropped = $state(0);
+	let lines = $state(0);
 	let copied = $state(false);
 	let ws: WebSocket | null = null;
 
@@ -87,6 +88,7 @@
 					case 'log':
 						if (m.ts && m.ts > lastTs) lastTs = m.ts;
 						keep(m.data);
+						lines += (m.data.match(/\n/g) ?? []).length || 1;
 						write(m.stream === 'stderr' ? `\x1b[38;5;217m${m.data}\x1b[0m` : m.data);
 						break;
 					case 'dropped':
@@ -124,7 +126,10 @@
 			else connect();
 			link = 'connecting';
 		};
-		clearView = () => term?.clear();
+		clearView = () => {
+			term?.clear();
+			lines = 0;
+		};
 		copyAll = async () => {
 			await navigator.clipboard.writeText(transcript.join('').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ''));
 		};
@@ -206,31 +211,39 @@
 		<p>This panel runs without Docker (BOTPANEL_RUNNER_MODE=none), so bots cannot run here and there is no output to show.</p>
 	</EmptyState>
 {:else}
-
-<div class="flex flex-wrap items-center gap-2 border border-b-0 border-rule-soft bg-panel px-2 py-1.5">
-	<span class="inline-flex items-center gap-1.5 text-small font-medium {linkColor}" aria-live="polite">
-		<span class="size-2 rounded-pill bg-current" aria-hidden="true"></span>{linkText}{#if paused}<span class="text-muted">, paused</span>{/if}
-	</span>
-	{#if dropped}<span class="text-small text-muted">{dropped} lines skipped</span>{/if}
-	<span class="flex-1"></span>
-	<button class="btn btn-sm btn-quiet" aria-pressed={paused} onclick={togglePause} title="Hold new output so you can read">
-		<Icon name={paused ? 'play' : 'pause'} size={13} />{paused ? 'Resume' : 'Pause'}
-	</button>
-	<button class="btn btn-sm btn-quiet" onclick={() => clearView()} title="Clear this view (the bot is not affected)">Clear</button>
-	<button class="btn btn-sm btn-quiet" onclick={copy}><Icon name={copied ? 'check' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}</button>
-	<button class="btn btn-sm btn-quiet" onclick={() => downloadAll()}><Icon name="download" size={13} />Download</button>
-	{#if link !== 'live'}<button class="btn btn-sm" onclick={() => reconnectNow()}>Reconnect</button>{/if}
-</div>
-<div bind:this={host} class="h-[max(20rem,calc(100dvh-26rem))] overflow-hidden bg-term p-2" aria-label="Bot output" role="log"></div>
-{#if notice}<p class="mt-2 text-small text-warn" role="status">{notice}</p>{/if}
-{#if canInput}
-	<form class="mt-2 flex gap-2" onsubmit={send}>
-		<label class="sr-only" for="stdin">Send a line to the bot</label>
-		<input id="stdin" class="field font-mono" placeholder="Send a line to the bot's standard input" autocomplete="off" spellcheck="false" bind:value={line} disabled={link !== 'live'} />
-		<button class="btn" disabled={link !== 'live' || line === ''}>Send</button>
-	</form>
-	<p class="mt-1 text-small text-muted">Input goes to the bot process, not to a shell. One console at a time can send input. Closing this page does not stop the bot.</p>
-{:else}
-	<p class="mt-2 text-small text-muted">You can watch the output. Sending input needs the start and stop permission. Closing this page does not stop the bot.</p>
-{/if}
+	<!-- A terminal window: title bar with the stream's state and tools, the
+	     output, and the line that goes to the bot's standard input. -->
+	<div class="overflow-hidden rounded-tile border border-rule-soft bg-term text-term-ink">
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/8 bg-black/25 px-3.5 py-2">
+			<span class="flex shrink-0 gap-1.5" aria-hidden="true"><i class="size-3 rounded-pill bg-fail/80"></i><i class="size-3 rounded-pill bg-warn/80"></i><i class="size-3 rounded-pill bg-run/80"></i></span>
+			<span class="eyebrow !text-term-ink/65">Console</span>
+			<span class="inline-flex items-center gap-1.5 text-[.72rem] font-medium {linkColor}" aria-live="polite">
+				<span class="size-1.5 rounded-pill bg-current {link === 'live' ? '' : 'animate-pulse'}" aria-hidden="true"></span>{linkText}{#if paused}<span class="text-term-ink/60">, paused</span>{/if}
+			</span>
+			{#if dropped}<span class="text-[.72rem] text-term-ink/60">{dropped} lines skipped</span>{/if}
+			<span class="flex-1"></span>
+			<span class="font-mono text-[.78rem] text-term-ink/50">{lines.toLocaleString()} {lines === 1 ? 'line' : 'lines'}</span>
+			{#if link !== 'live'}<button class="btn btn-sm !border-white/15 !bg-white/8 !text-term-ink hover:!bg-white/14" onclick={() => reconnectNow()}>Reconnect</button>{/if}
+			<div class="flex items-center">
+				<button class="btn btn-quiet btn-icon btn-sm !text-term-ink/70 hover:!bg-white/10 hover:!text-term-ink" aria-pressed={paused} onclick={togglePause} title={paused ? 'Resume output' : 'Hold new output so you can read'} aria-label={paused ? 'Resume output' : 'Pause output'}><Icon name={paused ? 'play' : 'pause'} size={13} /></button>
+				<button class="btn btn-quiet btn-icon btn-sm !text-term-ink/70 hover:!bg-white/10 hover:!text-term-ink" onclick={copy} title="Copy output" aria-label="Copy output"><Icon name={copied ? 'check' : 'copy'} size={13} /></button>
+				<button class="btn btn-quiet btn-icon btn-sm !text-term-ink/70 hover:!bg-white/10 hover:!text-term-ink" onclick={() => downloadAll()} title="Download output" aria-label="Download output"><Icon name="download" size={13} /></button>
+				<button class="btn btn-quiet btn-icon btn-sm !text-term-ink/70 hover:!bg-white/10 hover:!text-term-ink" onclick={() => clearView()} title="Clear this view (the bot is not affected)" aria-label="Clear view"><Icon name="trash" size={13} /></button>
+			</div>
+		</div>
+		<div bind:this={host} class="h-[max(20rem,calc(100dvh-30rem))] overflow-hidden p-2" aria-label="Bot output" role="log"></div>
+		{#if canInput}
+			<form class="flex items-center gap-2 border-t border-white/8 bg-black/20 px-3.5 py-1.5" onsubmit={send}>
+				<label class="sr-only" for="stdin">Send a line to the bot</label>
+				<span class="font-mono text-term-ink/50 select-none" aria-hidden="true">›</span>
+				<input id="stdin" class="min-h-9 min-w-0 flex-1 bg-transparent font-mono text-[.8125rem] text-term-ink outline-none placeholder:text-term-ink/40" placeholder="Send a line to the bot’s standard input" autocomplete="off" spellcheck="false" bind:value={line} disabled={link !== 'live'} />
+				<button class="btn btn-quiet btn-icon btn-sm !text-term-ink/70 hover:!bg-white/10 hover:!text-term-ink" disabled={link !== 'live' || line === ''} aria-label="Send" title="Send"><Icon name="send" size={14} /></button>
+			</form>
+		{/if}
+	</div>
+	{#if notice}<p class="mt-2 text-small text-warn" role="status">{notice}</p>{/if}
+	<p class="mt-2 text-small text-muted">
+		{#if canInput}Input goes to the bot process, not to a shell. One console at a time can send input.{:else}You can watch the output. Sending input needs the start and stop permission.{/if}
+		Closing this page does not stop the bot.
+	</p>
 {/if}

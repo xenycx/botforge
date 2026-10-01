@@ -39,18 +39,25 @@ type AICitation struct {
 type AIMessage struct {
 	ID, ConversationID, Role, Content string
 	CitationsJSON                     string
-	CreatedAtMS                       int64
+	// ContextJSON is what the person was viewing when they sent the message
+	// (see service.AIContext). It informs the model and the transcript; it
+	// never authorizes anything.
+	ContextJSON string
+	CreatedAtMS int64
 }
 
 type AIRun struct {
 	ID, ConversationID, UserID, Model, Mode, Status string
 	ProviderID                                      *string
-	LimitsJSON, PlanJSON                            string
-	AutoApprovedAtMS                                *int64
-	InputTokens, OutputTokens                       int64
-	ErrorCode, ErrorMessage                         *string
-	CreatedAtMS                                     int64
-	StartedAtMS, FinishedAtMS                       *int64
+	// BotID and SiteID are what the run works on; both nil means no target
+	// tools until the model focuses one.
+	BotID, SiteID             *string
+	LimitsJSON, PlanJSON      string
+	AutoApprovedAtMS          *int64
+	InputTokens, OutputTokens int64
+	ErrorCode, ErrorMessage   *string
+	CreatedAtMS               int64
+	StartedAtMS, FinishedAtMS *int64
 }
 
 type AIToolCall struct {

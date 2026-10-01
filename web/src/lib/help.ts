@@ -48,8 +48,8 @@ export function helpFor(b: Bot, opts: { siteAdmin: boolean; buildMemory?: number
 	if (e.includes('runtime is not available'))
 		return { title: 'The runtime was removed', body: 'Choose another runtime under Startup, or ask the administrator to restore it.' };
 	if (b.phase === 'failed' && b.state_reason === 'gave_up')
-		return { title: 'It keeps crashing', body: 'Open the console to see the last output before each crash, fix the cause, then start it again. The restart budget is set under Startup.', action: { label: 'Open console', href: `/bots/${b.id}?tab=console` } };
+		return { title: 'It keeps crashing', body: 'Open the console to see the last output before each crash, fix the cause, then start it again. The restart budget is set under Startup.', action: { label: 'Open console', href: `/bots/${b.id}?tab=manage` } };
 	if ((b.phase === 'retrying' || b.phase === 'failed') && /exited with code [1-9]/.test(e))
-		return { title: 'The process crashed', body: 'The console shows what it printed before exiting. A wrong or missing token is the most common cause for a new Discord bot.', action: { label: 'Open console', href: `/bots/${b.id}?tab=console` } };
+		return { title: 'The process crashed', body: 'The console shows what it printed before exiting. A wrong or missing token is the most common cause for a new Discord bot.', action: { label: 'Open console', href: `/bots/${b.id}?tab=manage` } };
 	return null;
 }

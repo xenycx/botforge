@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { publishDetail } from '$lib/ai/context.svelte';
 	import { onMount, onDestroy } from 'svelte';
 	import { api, ApiError, fetchRevision, putText, uploadProgress, fmtBytes } from '$lib/api/client';
 	import type { FileEntry } from '$lib/api/types';
@@ -24,6 +25,10 @@
 	let filter = $state('');
 
 	let open = $state<string | null>(null);
+	// The assistant is told which file is in view.
+	$effect(() => {
+		if (open) return publishDetail(`Viewing ${open}`);
+	});
 	let etag: string | null = null;
 	let saved = ''; // text as last loaded/saved, to know whether edits remain
 	let dirty = $state(false);

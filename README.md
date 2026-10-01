@@ -128,9 +128,11 @@ not enforced (Docker has no native cap).
 * `npm audit` reports low-severity findings in dev dependencies (not triaged).
 * Recorded in `docs/architecture.md`: console log delivery is at-least-once at
   reconnect boundaries, not exactly-once.
-* Target-scoped **AI Operator** for bots and sites: streamed investigation,
-  approval-gated or bounded automatic repair (file changes, offline
-  diagnostics and restarts under per-run limits, all audited), encrypted
-  OpenAI-compatible providers configurable in `/setup` or Administration,
-  cited web research, and staged diffs with undo. It cannot change startup
-  commands, deploy, publish sites or push to GitHub.
+* One panel-wide **AI assistant** (the Ask AI button on every page) that knows
+  which bot, site and section you are viewing: streamed investigation that
+  reads console output, build logs and files, approval-gated or bounded
+  automatic repair (file changes, offline diagnostics and restarts under
+  per-run limits, all audited), encrypted OpenAI-compatible providers
+  configurable in `/setup` or Administration, cited web research, and staged
+  diffs with undo. It cannot change startup commands, deploy, publish sites or
+  push to GitHub.

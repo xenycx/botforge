@@ -99,6 +99,7 @@ var auditRoutes = map[string]auditRoute{
 	"POST /api/v1/admin/ai/providers/:provider/test":       {"admin.ai_provider_test", param("provider")},
 	"PUT /api/v1/admin/ai/search":                          {"admin.ai_search", nil},
 	"POST /api/v1/admin/ai/search/test":                    {"admin.ai_search_test", nil},
+	"POST /api/v1/ai/conversations":                        {"ai.conversation_create", nil},
 	"POST /api/v1/bots/:id/ai/conversations":               {"ai.conversation_create", nil},
 	"POST /api/v1/sites/:sid/ai/conversations":             {"ai.conversation_create", nil},
 	"DELETE /api/v1/ai/conversations/:conversation":        {"ai.conversation_delete", param("conversation")},

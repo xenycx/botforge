@@ -6,7 +6,32 @@ authoritative current version.
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-01
+
 ### Added
+
+- The AI assistant is now one panel-wide chat. **Ask AI** (bottom right of every
+  page, the sparkle button in the header, or `Ctrl+.`) opens a compact
+  chat window that follows you from page to page. Each message carries what you
+  were looking at, shown as a chip you can dismiss: the bot or site, the tab or
+  section, and the open file. The server authorizes the bot or site id itself
+  and uses its real name. Chats are private to their creator, listed under a
+  history button, and a failed bot shows **Ask AI why**.
+- New assistant tools: `read_logs` (the bot's recent console output),
+  `build_output` (recent builds and deployments with the tail of their log),
+  and `list_targets` / `focus_target` so a chat started away from any bot can
+  look at one of your bots. The assistant now has a full system prompt with a
+  debugging method, safety rules, its limits and the current context.
+- Runtime diagnostic allowlists now include version checks, syntax checks and
+  running the bot's entry file (`node index.js`, `python main.py`, …), so
+  startup, import and syntax errors show up. A refused command now returns the
+  list of allowed commands and points to the file and log tools, and the
+  `run_diagnostic` tool description lists the allowed prefixes for the bot's
+  runtime.
+- The bot page uses a new layout: an identity card with **Open Studio** and
+  **Adjust resources**, one row of tabs, a status strip with live CPU, memory,
+  disk and network readings and Start/Restart/Stop/Kill, and a terminal-style
+  console as the default **Manage** tab.
 
 - AI Operator incident workspaces for bots and sites, with encrypted
   OpenAI-compatible provider profiles (DeepSeek preset), configurable
@@ -70,6 +95,18 @@ authoritative current version.
 
 ### Changed
 
+- The AI operator tab on bots and the AI section on site pages are gone; the
+  chat replaced them. The per-bot and per-site conversation endpoints still
+  work and keep their target, and `GET`/`POST /api/v1/ai/conversations` list and
+  create the new target-less chats (migration 0030 rebuilds the conversation
+  table; existing chats, runs, tool calls and undo snapshots are preserved).
+  Messages accept an optional `context` object, and a run records its own
+  `bot_id`/`site_id`.
+- Auto repair now needs a bot or site in view and its approval card names that
+  target; a run cannot move to another bot after it starts.
+- Bot page tabs were reorganised: the former Console tab is **Manage**
+  (`?tab=console` and `?tab=ai` still open it), Deployments is **Deploy**,
+  Environment is **Env**, and Public page is **Page**.
 - AI web-search requests honour `HTTP(S)_PROXY` (the search origin is
   administrator-trusted); public page fetches still connect directly.
 - AI run limits (diagnostics, apply attempts, lifecycle actions, changed
@@ -122,6 +159,20 @@ authoritative current version.
 
 ### Fixed
 
+- AI diagnostics always failed: the runner's reconciler mistook each
+  diagnostic container (labelled with the bot id) for a stale duplicate of the
+  bot and stopped it, so every run ended with exit code 137 and no output.
+  Diagnostic containers are now left alone and orphaned ones are removed on the
+  next resync.
+- AI diagnostics failed with "mount path must be absolute" when the panel ran
+  with a relative data directory (the default for `.dev-data`); the scratch
+  directory is now resolved to an absolute path.
+- The assistant could not debug a crashed bot because it had no way to see
+  console or build output and its only command tool refused almost everything
+  with "not allowed by the runtime policy"; see the new tools and allowlists
+  under Added.
+- `node --eval=…` and `--print=…` were not recognised as interpreter evaluation
+  flags, and `python -c` was refused even after `-m pytest`.
 - Every real AI run failed on its first provider request: tools without
   parameters were sent with `"required": null`, which DeepSeek (and other
   strict providers) reject. Found by testing against the live API.
@@ -161,6 +212,13 @@ authoritative current version.
 - `go.mod` now lists `golang.org/x/net`, `golang.org/x/mod`,
   `github.com/pkg/sftp`, and `github.com/docker/go-connections` as direct
   requirements.
+
+### Deprecated
+
+- `GET`/`POST /api/v1/bots/:id/ai/conversations` and
+  `/api/v1/sites/:sid/ai/conversations` are superseded by
+  `/api/v1/ai/conversations` with a message `context`. They keep working and
+  are not scheduled for removal yet.
 
 ### Security
 

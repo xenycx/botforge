@@ -11,6 +11,12 @@ default_argv: [/workspace/.venv/bin/python, main.py]
 allowed_commands: [python, python3, /workspace/.venv/bin/python]
 env: {PYTHONUNBUFFERED: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1"}
 diagnostic_commands:
+  - [python, --version]
+  - [python, -V]
+  - [python]
+  - [python, -m, py_compile]
+  - [python, -m, pip, list]
+  - [python, -m, pip, check]
   - [python, -m, compileall]
   - [python, -m, unittest]
   - [python, -m, pytest]

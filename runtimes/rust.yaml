@@ -11,7 +11,10 @@ default_argv: [./app]
 allow_workspace_binary: true
 env: {CARGO_HOME: /workspace/.cargo}
 diagnostic_commands:
+  - [cargo, --version]
+  - [rustc, --version]
   - [cargo, check]
+  - [cargo, build]
   - [cargo, test]
   - [cargo, clippy]
   - [cargo, fmt, --check]

@@ -21,11 +21,15 @@ These are per-browser preferences.
   with a review step and a result per bot, and a Ctrl+K switcher.
 - **New bot** (`/bots/new`): template, GitHub repository or empty bot; required
   values such as the token up front; review of memory, CPU and build memory.
-- **Bot page**: sticky status header with the exact lifecycle state and the
-  next useful action, and sections grouped as Operate (Overview, Console,
-  Public page, Health & alerts), Code (Files, Packages, Deployments), Configure
-  (Environment, Startup, Network) and Manage (Backups, Schedules, Access,
-  Settings). Unsaved edits are protected when navigating away.
+- **Bot page**: an identity card with shortcuts to the public page studio and
+  resource settings, one row of tabs (Manage, Overview, Files, Deploy, Startup,
+  Packages, Env, Network, Page, Health, Backups, Schedules, Access, Settings),
+  and a status strip with the exact lifecycle state, live CPU, memory, disk and
+  network readings, and Start, Restart, Stop and Kill. **Manage** is the
+  default: a terminal window with the live console and a line that goes to the
+  bot's standard input. A failed bot offers **Ask AI why**. Unsaved edits are
+  protected when navigating away; older `?tab=console`, `?tab=ai` and
+  `?tab=analytics` links still work.
 - **Activity** (`/activity`): work (builds, deployments, backups, restores) and
   changes (who changed what; names only, never values).
 - **Workspace switcher** (sidebar): scopes the overview, Sites and new bots to
@@ -359,8 +363,11 @@ re-encrypts every sealed value with the active key and can be re-run to
 continue; keep old key files while per-bot backups made before the reseal exist.
 `make release VERSION=x.y.z` builds Linux amd64/arm64 archives with
 `SHA256SUMS`.
-## AI operator
+## AI assistant
 
-Each bot and standalone site has a private operational AI workspace. See
-[AI operator](ai-operator.md) for providers, permissions, approval modes,
-research, limits, data boundaries, diagnostics and recovery behavior.
+One private AI chat opens from **Ask AI** on every page (bottom right, or the
+sparkle button in the header). It sees which bot, site, section and file you
+are looking at, can read a bot’s console output and build log, and can propose
+changes that wait for your approval. See [AI operator](ai-operator.md) for
+providers, permissions, approval modes, research, limits, data boundaries,
+diagnostics and recovery behavior.

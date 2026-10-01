@@ -8,6 +8,10 @@ default_argv: [./app]
 allow_workspace_binary: true
 env: {GOCACHE: /workspace/.cache/go-build, GOPATH: /workspace/.gopath}
 diagnostic_commands:
+  - [go, version]
+  - [go, env]
+  - [go, list]
+  - [go, run]
   - [go, test]
   - [go, vet]
   - [go, build]

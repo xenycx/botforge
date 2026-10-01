@@ -191,7 +191,7 @@ await step('overview explains the state without a runner', async () => {
 });
 
 await step('grouped section navigation keeps deep links and history', async () => {
-	await page.getByRole('link', { name: 'Environment' }).click();
+	await page.getByRole('link', { name: 'Env', exact: true }).click();
 	await page.waitForURL(/tab=env/);
 	await page.getByText('DISCORD_TOKEN').first().waitFor();
 	await page.getByRole('link', { name: 'Files' }).click();
@@ -264,7 +264,7 @@ await step('a shared console-only user sees output but no power or input control
 	const p = await newPage();
 	await signIn(p, 'viewer@e2e.test', userPw);
 	await p.goto(`/bots/${botId}?tab=console`);
-	await p.getByRole('link', { name: 'Console' }).waitFor(); // viewing is allowed
+	await p.getByRole('link', { name: 'Manage', exact: true }).waitFor(); // viewing is allowed
 	await p.getByText(/Live output needs the Docker runner|Bot output/).first().waitFor();
 	expect((await p.getByRole('group', { name: 'Power controls' }).count()) === 0, 'power controls shown');
 	expect((await p.getByLabel('Send a line to the bot').count()) === 0, 'stdin input shown');
@@ -279,6 +279,26 @@ await step('Ctrl+K jumps to a bot by name', async () => {
 	await page.getByPlaceholder('Bot name, tag or page').fill('discord');
 	await page.keyboard.press('Enter');
 	await page.waitForURL(new RegExp(`/bots/${botId}`));
+});
+
+await step('Ask AI opens one chat that knows which bot and section is in view', async () => {
+	await page.goto(`/bots/${botId}?tab=files`);
+	await page.getByRole('link', { name: 'Files', exact: true }).waitFor();
+	expect((await page.getByRole('link', { name: 'AI operator' }).count()) === 0, 'the per-bot AI tab is still there');
+	await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+	const chat = page.getByRole('dialog', { name: 'AI assistant' });
+	await chat.waitFor();
+	// No provider is configured in this panel: the chat says so instead of failing.
+	await chat.getByText('The assistant is not set up yet').waitFor();
+	expect((await chat.getByTitle(/This page is shared with the assistant/).textContent()).toLowerCase().includes('files'), 'the context chip does not name the section');
+	await chat.getByRole('button', { name: 'Do not share this page with the assistant' }).click();
+	await chat.getByRole('button', { name: /^Share/ }).waitFor();
+	// It follows the person to another page.
+	await chat.getByRole('button', { name: 'Close' }).click();
+	await page.getByRole('link', { name: 'Activity', exact: true }).first().click();
+	await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+	await page.getByRole('dialog', { name: 'AI assistant' }).getByTitle(/This page is shared with the assistant: \/activity/).waitFor();
+	await page.keyboard.press('Escape');
 });
 
 await step('the Changes view lists who changed what, without values', async () => {

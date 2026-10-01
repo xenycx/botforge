@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError, fmtBytes, fmtCpu } from '$lib/api/client';
 	import { can, Perm, type Bot } from '$lib/api/types';
 	import { power, type PowerAction } from '$lib/api/bots';
-	import { describe, isStopped, mayBeLive } from '$lib/status';
+	import { isStopped } from '$lib/status';
 	import { session } from '$lib/session.svelte';
 	import Icon, { type IconName } from '$lib/components/ui/Icon.svelte';
-	import Menu, { type MenuItem } from '$lib/components/ui/Menu.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
-	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
-	import ResourceStrip from '$lib/components/ResourceStrip.svelte';
+	import StatsBar from '$lib/components/StatsBar.svelte';
 	import Overview from '$lib/components/Overview.svelte';
 	import Console from '$lib/components/Console.svelte';
 	import Files from '$lib/components/Files.svelte';
@@ -27,7 +24,7 @@
 	import Settings from '$lib/components/Settings.svelte';
 	import Schedules from '$lib/components/Schedules.svelte';
 	import Alerts from '$lib/components/Alerts.svelte';
-	import AIOperator from '$lib/components/AIOperator.svelte';
+	import { publishTarget } from '$lib/ai/context.svelte';
 
 	let { id }: { id: string } = $props();
 
@@ -36,63 +33,41 @@
 	let loadError = $state('');
 	let now = $state(Date.now());
 	let acting = $state(false);
+	let tabs = $state<HTMLElement | null>(null);
 
 	type Section = { id: string; label: string; icon: IconName; perm: number };
-	// Grouped by what the user is doing. perm -1 = owner or administrator only;
-	// 0 = anyone with access. The server enforces the same rules.
-	const groups: { label: string; items: Section[] }[] = [
-		{
-			label: 'Operate',
-			items: [
-				{ id: 'overview', label: 'Overview', icon: 'overview', perm: 0 },
-				{ id: 'ai', label: 'AI operator', icon: 'bolt', perm: 0 },
-				{ id: 'console', label: 'Console', icon: 'terminal', perm: Perm.console },
-				{ id: 'page', label: 'Public page', icon: 'globe', perm: Perm.console },
-				{ id: 'alerts', label: 'Health & alerts', icon: 'activity', perm: Perm.console }
-			]
-		},
-		{
-			label: 'Code',
-			items: [
-				{ id: 'files', label: 'Files', icon: 'file', perm: Perm.files },
-				{ id: 'packages', label: 'Packages', icon: 'package', perm: Perm.files },
-				{ id: 'deploy', label: 'Deployments', icon: 'rocket', perm: Perm.files }
-			]
-		},
-		{
-			label: 'Configure',
-			items: [
-				{ id: 'env', label: 'Environment', icon: 'key', perm: Perm.env },
-				{ id: 'startup', label: 'Startup', icon: 'sliders', perm: Perm.admin },
-				{ id: 'network', label: 'Network', icon: 'network', perm: Perm.admin }
-			]
-		},
-		{
-			label: 'Manage',
-			items: [
-				{ id: 'backups', label: 'Backups', icon: 'archive', perm: Perm.files },
-				{ id: 'schedules', label: 'Schedules', icon: 'clock', perm: 0 },
-				{ id: 'users', label: 'Access', icon: 'users', perm: -1 },
-				{ id: 'settings', label: 'Settings', icon: 'gear', perm: Perm.admin }
-			]
-		}
+	// One row of tabs, in the order people reach for them. perm -1 = owner or
+	// administrator only; 0 = anyone with access. The server enforces the same
+	// rules.
+	const sections: Section[] = [
+		{ id: 'manage', label: 'Manage', icon: 'terminal', perm: 0 },
+		{ id: 'overview', label: 'Overview', icon: 'overview', perm: 0 },
+		{ id: 'files', label: 'Files', icon: 'file', perm: Perm.files },
+		{ id: 'deploy', label: 'Deploy', icon: 'rocket', perm: Perm.files },
+		{ id: 'startup', label: 'Startup', icon: 'sliders', perm: Perm.admin },
+		{ id: 'packages', label: 'Packages', icon: 'package', perm: Perm.files },
+		{ id: 'env', label: 'Env', icon: 'key', perm: Perm.env },
+		{ id: 'network', label: 'Network', icon: 'network', perm: Perm.admin },
+		{ id: 'page', label: 'Page', icon: 'globe', perm: Perm.console },
+		{ id: 'alerts', label: 'Health', icon: 'activity', perm: Perm.console },
+		{ id: 'backups', label: 'Backups', icon: 'archive', perm: Perm.files },
+		{ id: 'schedules', label: 'Schedules', icon: 'clock', perm: 0 },
+		{ id: 'users', label: 'Access', icon: 'users', perm: -1 },
+		{ id: 'settings', label: 'Settings', icon: 'gear', perm: Perm.admin }
 	];
 	// Sections for features this panel does not run are left out entirely.
-	const available: Record<string, keyof typeof session.features> = { ai: 'ai', files: 'files', packages: 'files', backups: 'backups', schedules: 'schedules', alerts: 'health' };
+	const available: Record<string, keyof typeof session.features> = { files: 'files', packages: 'files', backups: 'backups', schedules: 'schedules', alerts: 'health' };
 	const allowed = (s: Section) =>
 		!!bot && (!available[s.id] || session.features[available[s.id]]) && (s.perm === 0 || (s.perm === -1 ? !bot.shared : can(bot, s.perm)));
-	const visibleGroups = $derived(groups.map((g) => ({ ...g, items: g.items.filter(allowed) })).filter((g) => g.items.length));
-	const flat = $derived(visibleGroups.flatMap((g) => g.items));
-	const requested = $derived(page.url.searchParams.get('tab') === 'analytics' ? 'page' : (page.url.searchParams.get('tab') ?? 'overview'));
-	const tab = $derived(flat.some((s) => s.id === requested) ? requested : 'overview');
-	const current = $derived(flat.find((s) => s.id === tab));
-	const idx = $derived(flat.findIndex((s) => s.id === tab));
+	const flat = $derived(sections.filter(allowed));
+	// Links from before the tabs were reorganised keep working.
+	const legacy: Record<string, string> = { analytics: 'page', console: 'manage', ai: 'manage' };
+	const asked = $derived(page.url.searchParams.get('tab') ?? 'manage');
+	const requested = $derived(legacy[asked] ?? asked);
+	const tab = $derived(flat.some((s) => s.id === requested) ? requested : 'manage');
 
 	function sectionHref(sid: string) {
 		return `/bots/${id}?tab=${sid}`;
-	}
-	function pick(sid: string) {
-		goto(sectionHref(sid), { noScroll: true, keepFocus: true });
 	}
 
 	async function refresh() {
@@ -121,26 +96,23 @@
 		acting = false;
 	}
 
-	const d = $derived(bot ? describe(bot, now) : null);
 	const stopped = $derived(bot ? isStopped(bot) : false);
 	const isOwner = $derived(bot ? !bot.shared : false);
 	const admin = $derived(bot ? can(bot, Perm.admin) : false);
 	// Without a runner, lifecycle requests can only fail: offer none.
 	const canPower = $derived(bot ? can(bot, Perm.power) && session.features.runner : false);
-	const running = $derived(bot?.desired_state === 'running');
-	// A bot that settled after exiting (gave up, exited cleanly) is wanted
-	// running but idle: the useful action is to start it again, not Stop.
-	const settledIdle = $derived(!!bot && running && (bot.phase === 'failed' || bot.phase === 'exited'));
 	const configSection = $derived(['env', 'startup', 'network', 'settings'].includes(tab));
 
-	const powerMenu = $derived.by((): MenuItem[] => {
-		if (!bot) return [];
-		const items: MenuItem[] = [];
-		if (settledIdle) items.push({ label: 'Stop', onselect: () => act('stop'), hint: 'Stop trying and mark it stopped' });
-		else if (running) items.push({ label: 'Restart', onselect: () => act('restart') }, { label: 'Stop', onselect: () => act('stop') });
-		else items.push({ label: 'Start', onselect: () => act('start') });
-		items.push('separator', { label: 'Kill', danger: true, disabled: !mayBeLive(bot), hint: 'Ends the process immediately', onselect: () => act('kill') });
-		return items;
+	// Tell the assistant which bot and tab are in view.
+	// A narrow window scrolls the tab row; keep the current tab visible.
+	$effect(() => {
+		void tab;
+		tabs?.querySelector('[aria-current=page]')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+	});
+	const botName = $derived(bot?.name ?? '');
+	$effect(() => {
+		if (!botName) return;
+		return publishTarget({ kind: 'bot', id, label: botName, section: tab === 'manage' ? 'Console' : (sections.find((x) => x.id === tab)?.label ?? tab) });
 	});
 </script>
 
@@ -149,133 +121,85 @@
 {#if missing}
 	<h1 class="text-page">Bot not found</h1>
 	<p class="mt-1 text-muted">It was deleted, or it belongs to another account. <a class="link" href="/dashboard">Back to your bots</a></p>
-{:else if !bot || !d}
+{:else if !bot}
 	{#if loadError}<Notice tone="fail">{loadError}</Notice>{:else}<Skeleton rows={4} label="Loading bot" />{/if}
 {:else}
-	<!-- One compact bar: identity, state, live usage and power stay in view
-	     under the top bar while the section below scrolls. -->
-	<header class="spine sticky top-16 z-20 -mx-4 border-b border-rule-soft bg-panel py-2.5 pr-3 pl-5 sm:mx-0 sm:overflow-hidden sm:rounded-tile sm:border sm:pr-3.5" data-tone={d.tone} data-busy={d.busy}>
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-			<div class="flex min-w-0 flex-1 basis-64 items-center gap-2">
-				<a href="/dashboard" class="btn btn-quiet btn-icon btn-sm shrink-0 text-muted" aria-label="Back to bots" title="Back to bots"><Icon name="chevronLeft" size={16} /></a>
-				<div class="min-w-0">
-					<div class="flex min-w-0 items-center gap-x-3">
-						<h1 class="truncate text-section">{bot.name}</h1>
-						<span class="shrink-0"><StatusBadge {bot} {now} size="sm" /></span>
-						{#if bot.shared}<span class="hidden shrink-0 text-small text-muted sm:inline">Shared with you</span>{/if}
-					</div>
-					<p class="truncate text-small text-muted" title="{bot.runtime}, {fmtBytes(bot.memory_bytes)} memory, {fmtCpu(bot.nano_cpus)}">
-						{bot.runtime} · {fmtBytes(bot.memory_bytes)} · {fmtCpu(bot.nano_cpus)}{#if bot.source_type === 'github'} · deployed from GitHub{/if}
-					</p>
-				</div>
-			</div>
-			{#if can(bot, Perm.console) && session.features.stats}<div class="hidden xl:block"><ResourceStrip botId={id} cpuLimit={bot.nano_cpus / 1e9} compact /></div>{/if}
-			{#if canPower}
-				<div class="flex shrink-0 items-center gap-1.5" role="group" aria-label="Power controls">
-					{#if settledIdle}
-						<button class="btn btn-primary" disabled={acting} onclick={() => act('start')}><Icon name="play" size={12} />Start again</button>
-					{:else if running}
-						<button class="btn hidden sm:inline-flex" disabled={acting} onclick={() => act('restart')}><Icon name="restart" />Restart</button>
-						<button class="btn" disabled={acting} onclick={() => act('stop')}><Icon name="stop" size={12} />Stop</button>
-					{:else}
-						<button class="btn btn-primary" disabled={acting} onclick={() => act('start')}><Icon name="play" size={12} />Start</button>
-					{/if}
-					<Menu label="More power actions" items={powerMenu} fixed />
-				</div>
+	<!-- Identity, the shortcuts people use most, and one row of tabs. -->
+	<header class="rounded-tile border border-rule-soft bg-panel">
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3.5">
+			<a href="/dashboard" class="btn btn-quiet btn-icon btn-sm shrink-0 text-muted" aria-label="Back to bots" title="Back to bots"><Icon name="chevronLeft" size={16} /></a>
+			{#if bot.discord_avatar_url}
+				<img src={bot.discord_avatar_url} alt="" class="size-11 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" />
+			{:else}
+				<span class="grid size-11 shrink-0 place-items-center rounded-tile bg-paper-2/70 text-action"><Icon name="box" size={20} /></span>
 			{/if}
+			<div class="min-w-0 flex-1 basis-56">
+				<h1 class="truncate text-section font-semibold">{bot.name}</h1>
+				<p class="truncate text-small text-muted" title="{bot.runtime}, {fmtBytes(bot.memory_bytes)} memory, {fmtCpu(bot.nano_cpus)}">
+					{bot.runtime} · {fmtBytes(bot.memory_bytes)} · {fmtCpu(bot.nano_cpus)}{#if bot.source_type === 'github'} · deployed from GitHub{/if}{#if bot.shared} · shared with you{/if}
+				</p>
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				{#if flat.some((s) => s.id === 'page')}<a class="btn gap-1.5 border-action/50 text-action hover:bg-action/8" href={sectionHref('page')} data-sveltekit-noscroll><Icon name="globe" size={14} />Open Studio</a>{/if}
+				{#if flat.some((s) => s.id === 'settings')}<a class="btn btn-primary gap-1.5" href={sectionHref('settings')} data-sveltekit-noscroll><Icon name="sliders" size={14} />Adjust resources</a>{/if}
+			</div>
 		</div>
-		{#if d.detail}<p class="mt-1 truncate pl-9 text-small {d.tone === 'fail' ? 'text-fail' : 'text-muted'}" title={d.detail} aria-live="polite">{d.detail}</p>{/if}
+		<nav class="flex gap-0.5 overflow-x-auto border-t border-rule-soft px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Bot sections" bind:this={tabs}>
+			{#each flat as s (s.id)}
+				<a
+					href={sectionHref(s.id)}
+					data-sveltekit-noscroll
+					data-sveltekit-keepfocus
+					class="relative flex shrink-0 items-center gap-2 px-2.5 py-3 text-small font-medium whitespace-nowrap {tab === s.id ? 'text-action after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:bg-action' : 'text-muted hover:text-ink'}"
+					aria-current={tab === s.id ? 'page' : undefined}
+				>
+					<Icon name={s.icon} />{s.label}
+				</a>
+			{/each}
+		</nav>
 	</header>
 
-	{#if can(bot, Perm.console) && session.features.stats}<div class="mt-3 xl:hidden"><ResourceStrip botId={id} cpuLimit={bot.nano_cpus / 1e9} /></div>{/if}
+	<div class="mt-4"><StatsBar {bot} {now} showStats={can(bot, Perm.console) && session.features.stats} {canPower} {acting} onAct={act} /></div>
 	{#if loadError}<Notice tone="warn" class="mt-3">{loadError}</Notice>{/if}
 
-	<div class="mt-5 lg:grid lg:grid-cols-[11.5rem_minmax(0,1fr)] lg:gap-8">
-		<nav class="hidden lg:block" aria-label="Bot sections">
-			<div class="sticky top-40 space-y-4">
-				{#each visibleGroups as g (g.label)}
-					<div>
-						<p class="eyebrow px-2 pb-1">{g.label}</p>
-						<ul>
-							{#each g.items as s (s.id)}
-								<li>
-									<a
-										href={sectionHref(s.id)}
-										data-sveltekit-noscroll
-										data-sveltekit-keepfocus
-										class="flex items-center gap-2.5 rounded-control px-2 py-[5px] {tab === s.id ? 'bg-panel font-medium text-ink shadow-[inset_3px_0_0_var(--color-action)]' : 'text-ink/75 hover:bg-panel/70 hover:text-ink'}"
-										aria-current={tab === s.id ? 'page' : undefined}
-									>
-										<Icon name={s.icon} class={tab === s.id ? 'text-action' : 'text-muted'} />{s.label}
-									</a>
-								</li>
-							{/each}
-						</ul>
-					</div>
-				{/each}
-			</div>
-		</nav>
+	<section class="mt-4 min-w-0" aria-label={flat.find((s) => s.id === tab)?.label}>
+		{#if configSection && !stopped}
+			<Notice tone="warn" class="mb-4" title="Stop the bot to change these settings">
+				Changes need a stopped bot and apply the next time it starts.
+				{#snippet action()}
+					{#if canPower}<button class="btn btn-sm" disabled={acting} onclick={() => act('stop')}>Stop bot</button>{/if}
+				{/snippet}
+			</Notice>
+		{/if}
 
-		<div class="mb-4 lg:hidden">
-			<label class="block">
-				<span class="sr-only">Section</span>
-				<select class="field font-medium" value={tab} onchange={(e) => pick(e.currentTarget.value)}>
-					{#each visibleGroups as g (g.label)}
-						<optgroup label={g.label}>
-							{#each g.items as s (s.id)}<option value={s.id}>{s.label}</option>{/each}
-						</optgroup>
-					{/each}
-				</select>
-			</label>
-		</div>
-
-		<section class="min-w-0" aria-labelledby="section-title">
-			<h2 id="section-title" class="sr-only">{current?.label}</h2>
-			{#if configSection && !stopped}
-				<Notice tone="warn" class="mb-4" title="Stop the bot to change these settings">
-					Changes need a stopped bot and apply the next time it starts.
-					{#snippet action()}
-						{#if canPower}<button class="btn btn-sm" disabled={acting} onclick={() => act('stop')}>Stop bot</button>{/if}
-					{/snippet}
-				</Notice>
-			{/if}
-
-			{#if tab === 'overview'}
-				<Overview {bot} {now} onSaved={(b) => (bot = b)} onAct={act} {acting} />
-			{:else if tab === 'ai'}
-				<AIOperator botId={id} targetName={bot.name} />
-			{:else if tab === 'console'}
-				<Console {bot} />
-			{:else if tab === 'page'}
-				<PageStudio botId={id} botName={bot.name} canEdit={can(bot, Perm.files)} canAdmin={admin} {stopped} />
-			{:else if tab === 'files'}
-				<Files botId={id} running={!stopped} />
-			{:else if tab === 'packages'}
-				<Packages botId={id} running={!stopped} />
-			{:else if tab === 'deploy'}
-				<Deploy {bot} {admin} />
-			{:else if tab === 'env'}
-				<Env {bot} running={!stopped} />
-			{:else if tab === 'startup'}
-				<Startup {bot} {stopped} onSaved={(b) => (bot = b)} />
-			{:else if tab === 'network'}
-				<Network {bot} {stopped} owner={isOwner} onSaved={(b) => (bot = b)} />
-			{:else if tab === 'backups'}
-				<Backups {bot} {stopped} {admin} onSaved={(b) => (bot = b)} />
-			{:else if tab === 'alerts'}
-				<Alerts {bot} {admin} />
-			{:else if tab === 'schedules'}
-				<Schedules {bot} />
-			{:else if tab === 'users'}
-				<Users botId={id} botName={bot.name} />
-			{:else if tab === 'settings'}
-				<Settings {bot} {stopped} onSaved={(b) => (bot = b)} />
-			{/if}
-
-			<div class="mt-10 flex justify-between gap-2 border-t border-rule-soft pt-3 lg:hidden">
-				{#if idx > 0}<a class="btn btn-quiet" href={sectionHref(flat[idx - 1].id)} data-sveltekit-noscroll><Icon name="chevronLeft" size={14} />{flat[idx - 1].label}</a>{:else}<span></span>{/if}
-				{#if idx >= 0 && idx < flat.length - 1}<a class="btn btn-quiet" href={sectionHref(flat[idx + 1].id)} data-sveltekit-noscroll>{flat[idx + 1].label}<Icon name="chevronRight" size={14} /></a>{/if}
-			</div>
-		</section>
-	</div>
+		{#if tab === 'manage'}
+			{#if can(bot, Perm.console)}<Console {bot} />{:else}<Overview {bot} {now} onSaved={(b) => (bot = b)} onAct={act} {acting} />{/if}
+		{:else if tab === 'overview'}
+			<Overview {bot} {now} onSaved={(b) => (bot = b)} onAct={act} {acting} />
+		{:else if tab === 'page'}
+			<PageStudio botId={id} botName={bot.name} canEdit={can(bot, Perm.files)} canAdmin={admin} {stopped} />
+		{:else if tab === 'files'}
+			<Files botId={id} running={!stopped} />
+		{:else if tab === 'packages'}
+			<Packages botId={id} running={!stopped} />
+		{:else if tab === 'deploy'}
+			<Deploy {bot} {admin} />
+		{:else if tab === 'env'}
+			<Env {bot} running={!stopped} />
+		{:else if tab === 'startup'}
+			<Startup {bot} {stopped} onSaved={(b) => (bot = b)} />
+		{:else if tab === 'network'}
+			<Network {bot} {stopped} owner={isOwner} onSaved={(b) => (bot = b)} />
+		{:else if tab === 'backups'}
+			<Backups {bot} {stopped} {admin} onSaved={(b) => (bot = b)} />
+		{:else if tab === 'alerts'}
+			<Alerts {bot} {admin} />
+		{:else if tab === 'schedules'}
+			<Schedules {bot} />
+		{:else if tab === 'users'}
+			<Users botId={id} botName={bot.name} />
+		{:else if tab === 'settings'}
+			<Settings {bot} {stopped} onSaved={(b) => (bot = b)} />
+		{/if}
+	</section>
 {/if}

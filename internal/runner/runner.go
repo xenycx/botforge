@@ -401,7 +401,9 @@ func (r *Runner) watch(ctx context.Context) error {
 			// their events would just retrigger failed builds.
 			// Several panels (or tests) may share one daemon: only ever react to
 			// containers labelled with THIS runner's node.
-			if ev.BotID != "" && ev.Role != RoleBuilder && ev.NodeID == r.opts.NodeID && r.sameInstall(ev.InstallID) {
+			// Diagnostic containers (the AI assistant's offline checks) are owned by
+			// the diagnostic runner; reconciling them would kill them mid-run.
+			if ev.BotID != "" && ev.Role != RoleBuilder && ev.Role != RoleDiagnostic && ev.NodeID == r.opts.NodeID && r.sameInstall(ev.InstallID) {
 				r.enqueue(ev.BotID)
 			}
 		case err := <-errs:
@@ -434,6 +436,7 @@ func (r *Runner) resync(ctx context.Context) error {
 		return fmt.Errorf("list containers: %w", err)
 	}
 	_ = r.store.TouchNode(rctx, r.opts.NodeID, r.now().UnixMilli())
+	r.sweepDiagnostics(rctx)
 
 	has := map[string]bool{}
 	for _, c := range conts {
@@ -470,11 +473,44 @@ func (r *Runner) listMine(ctx context.Context, botID string) ([]ContainerInfo, e
 	}
 	mine := all[:0]
 	for _, c := range all {
+		// A diagnostic container carries its bot's id but is not part of the
+		// bot's runtime: the reconciler would stop it as a stale duplicate.
+		if c.Role() == RoleDiagnostic {
+			continue
+		}
 		if c.Labels[LabelNode] == r.opts.NodeID && r.sameInstall(c.Labels[LabelInstall]) {
 			mine = append(mine, c)
 		}
 	}
 	return mine, nil
+}
+
+// diagnosticGrace is how long a diagnostic container may outlive its run
+// before a resync treats it as an orphan (the panel restarted mid-run).
+const diagnosticGrace = 30 * time.Minute
+
+// sweepDiagnostics removes diagnostic containers that no run owns any more.
+func (r *Runner) sweepDiagnostics(ctx context.Context) {
+	all, err := r.docker.ListManaged(ctx, "")
+	if err != nil {
+		return
+	}
+	for _, c := range all {
+		if c.Role() != RoleDiagnostic || c.Labels[LabelNode] != r.opts.NodeID || r.opts.InstallID == "" || c.Labels[LabelInstall] != r.opts.InstallID {
+			continue
+		}
+		since := c.FinishedAt
+		if c.Live() {
+			since = c.StartedAt
+		}
+		if since.IsZero() || r.now().Sub(since) < diagnosticGrace {
+			continue
+		}
+		r.log.Warn("removing orphan diagnostic container", "container", c.ID)
+		if err := r.removeContainer(ctx, c); err != nil {
+			r.log.Warn("could not remove orphan diagnostic container", "container", c.ID, "err", err)
+		}
+	}
 }
 
 // sameInstall reports whether a container's installation label is compatible

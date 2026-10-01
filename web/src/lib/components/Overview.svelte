@@ -148,7 +148,7 @@
 							<button class="btn btn-primary" disabled={acting || (pendingSetup && missingVars.length > 0)} onclick={() => onAct('start')}><Icon name="play" size={12} />Start</button>
 						{/if}
 						{#if can(bot, Perm.console) && ['running', 'retrying', 'failed', 'exited'].includes(bot.phase) && bot.state_reason !== 'setup_failed' && bot.state_reason !== 'build_failed'}
-							<a class="btn" href="?tab=console" data-sveltekit-noscroll><Icon name="terminal" />Open console</a>
+							<a class="btn" href="?tab=manage" data-sveltekit-noscroll><Icon name="terminal" />Open console</a>
 						{/if}
 						{#if bot.state_reason === 'build_failed' && can(bot, Perm.admin)}
 							<a class="btn" href="?tab=startup" data-sveltekit-noscroll>Check startup settings</a>

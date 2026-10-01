@@ -10,8 +10,17 @@ build_argv:
 default_argv: [node, index.js]
 allowed_commands: [node, npm, npx]
 env: {NODE_ENV: production}
+# Direct argv only (no shell), run offline in a throwaway copy of the files.
+# [node] lets the AI run the bot's entry file to surface startup, syntax and
+# import errors; evaluation flags (-e, -p) are refused by the runner.
 diagnostic_commands:
+  - [node, --version]
+  - [node, -v]
   - [node, --check]
+  - [node]
+  - [npm, --version]
+  - [npm, ls]
+  - [npm, list]
   - [npm, test]
   - [npm, run, test]
   - [npm, run, build]

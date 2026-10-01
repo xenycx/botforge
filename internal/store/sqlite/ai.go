@@ -119,6 +119,29 @@ func (db *DB) ListAIConversations(ctx context.Context, creatorID string, botID, 
 	return out, rows.Err()
 }
 
+// ListUserAIConversations returns one person's conversations across the whole
+// panel, newest first. Administrators get no wider view: a chat is private to
+// its creator.
+func (db *DB) ListUserAIConversations(ctx context.Context, creatorID string, limit int) ([]domain.AIConversation, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id,creator_id,bot_id,site_id,title,provider_id,model,created_at_ms,updated_at_ms FROM ai_conversations WHERE creator_id=? ORDER BY updated_at_ms DESC LIMIT ?`, creatorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.AIConversation
+	for rows.Next() {
+		v, e := scanAIConversation(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (db *DB) UpdateAIConversation(ctx context.Context, v domain.AIConversation) error {
 	r, err := db.ExecContext(ctx, `UPDATE ai_conversations SET title=?,provider_id=?,model=?,updated_at_ms=? WHERE id=?`, v.Title, v.ProviderID, v.Model, v.UpdatedAtMS, v.ID)
 	if err != nil {
@@ -141,8 +164,15 @@ func (db *DB) DeleteAIConversation(ctx context.Context, id string) error {
 	return nil
 }
 
+func contextOrEmpty(v string) string {
+	if v == "" {
+		return "{}"
+	}
+	return v
+}
+
 func (db *DB) InsertAIMessage(ctx context.Context, m domain.AIMessage) error {
-	_, e := db.ExecContext(ctx, `INSERT INTO ai_messages(id,conversation_id,role,content,citations_json,created_at_ms) VALUES(?,?,?,?,?,?)`, m.ID, m.ConversationID, m.Role, m.Content, m.CitationsJSON, m.CreatedAtMS)
+	_, e := db.ExecContext(ctx, `INSERT INTO ai_messages(id,conversation_id,role,content,citations_json,context_json,created_at_ms) VALUES(?,?,?,?,?,?,?)`, m.ID, m.ConversationID, m.Role, m.Content, m.CitationsJSON, contextOrEmpty(m.ContextJSON), m.CreatedAtMS)
 	return mapErr(e)
 }
 
@@ -150,7 +180,7 @@ func (db *DB) ListAIMessages(ctx context.Context, conversationID string, limit i
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, e := db.QueryContext(ctx, `SELECT id,conversation_id,role,content,citations_json,created_at_ms FROM (SELECT * FROM ai_messages WHERE conversation_id=? ORDER BY created_at_ms DESC LIMIT ?) ORDER BY created_at_ms`, conversationID, limit)
+	rows, e := db.QueryContext(ctx, `SELECT id,conversation_id,role,content,citations_json,context_json,created_at_ms FROM (SELECT * FROM ai_messages WHERE conversation_id=? ORDER BY created_at_ms DESC LIMIT ?) ORDER BY created_at_ms`, conversationID, limit)
 	if e != nil {
 		return nil, e
 	}
@@ -158,7 +188,7 @@ func (db *DB) ListAIMessages(ctx context.Context, conversationID string, limit i
 	var out []domain.AIMessage
 	for rows.Next() {
 		var m domain.AIMessage
-		if e = rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.CitationsJSON, &m.CreatedAtMS); e != nil {
+		if e = rows.Scan(&m.ID, &m.ConversationID, &m.Role, &m.Content, &m.CitationsJSON, &m.ContextJSON, &m.CreatedAtMS); e != nil {
 			return nil, e
 		}
 		out = append(out, m)
@@ -167,24 +197,24 @@ func (db *DB) ListAIMessages(ctx context.Context, conversationID string, limit i
 }
 
 func (db *DB) InsertAIRun(ctx context.Context, r domain.AIRun) error {
-	_, e := db.ExecContext(ctx, `INSERT INTO ai_runs(id,conversation_id,user_id,provider_id,model,mode,status,limits_json,plan_json,auto_approved_at_ms,input_tokens,output_tokens,error_code,error_message,created_at_ms,started_at_ms,finished_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, r.ID, r.ConversationID, r.UserID, r.ProviderID, r.Model, r.Mode, r.Status, r.LimitsJSON, r.PlanJSON, r.AutoApprovedAtMS, r.InputTokens, r.OutputTokens, r.ErrorCode, r.ErrorMessage, r.CreatedAtMS, r.StartedAtMS, r.FinishedAtMS)
+	_, e := db.ExecContext(ctx, `INSERT INTO ai_runs(id,conversation_id,user_id,provider_id,model,mode,status,limits_json,plan_json,auto_approved_at_ms,input_tokens,output_tokens,error_code,error_message,created_at_ms,started_at_ms,finished_at_ms,bot_id,site_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, r.ID, r.ConversationID, r.UserID, r.ProviderID, r.Model, r.Mode, r.Status, r.LimitsJSON, r.PlanJSON, r.AutoApprovedAtMS, r.InputTokens, r.OutputTokens, r.ErrorCode, r.ErrorMessage, r.CreatedAtMS, r.StartedAtMS, r.FinishedAtMS, r.BotID, r.SiteID)
 	return mapErr(e)
 }
 
 func scanAIRun(row interface{ Scan(...any) error }) (domain.AIRun, error) {
 	var r domain.AIRun
-	e := row.Scan(&r.ID, &r.ConversationID, &r.UserID, &r.ProviderID, &r.Model, &r.Mode, &r.Status, &r.LimitsJSON, &r.PlanJSON, &r.AutoApprovedAtMS, &r.InputTokens, &r.OutputTokens, &r.ErrorCode, &r.ErrorMessage, &r.CreatedAtMS, &r.StartedAtMS, &r.FinishedAtMS)
+	e := row.Scan(&r.ID, &r.ConversationID, &r.UserID, &r.ProviderID, &r.Model, &r.Mode, &r.Status, &r.LimitsJSON, &r.PlanJSON, &r.AutoApprovedAtMS, &r.InputTokens, &r.OutputTokens, &r.ErrorCode, &r.ErrorMessage, &r.CreatedAtMS, &r.StartedAtMS, &r.FinishedAtMS, &r.BotID, &r.SiteID)
 	return r, mapErr(e)
 }
 
-const aiRunCols = `id,conversation_id,user_id,provider_id,model,mode,status,limits_json,plan_json,auto_approved_at_ms,input_tokens,output_tokens,error_code,error_message,created_at_ms,started_at_ms,finished_at_ms`
+const aiRunCols = `id,conversation_id,user_id,provider_id,model,mode,status,limits_json,plan_json,auto_approved_at_ms,input_tokens,output_tokens,error_code,error_message,created_at_ms,started_at_ms,finished_at_ms,bot_id,site_id`
 
 func (db *DB) GetAIRun(ctx context.Context, id string) (domain.AIRun, error) {
 	return scanAIRun(db.QueryRowContext(ctx, `SELECT `+aiRunCols+` FROM ai_runs WHERE id=?`, id))
 }
 
 func (db *DB) UpdateAIRun(ctx context.Context, r domain.AIRun) error {
-	_, e := db.ExecContext(ctx, `UPDATE ai_runs SET status=?,plan_json=?,auto_approved_at_ms=?,input_tokens=?,output_tokens=?,error_code=?,error_message=?,started_at_ms=?,finished_at_ms=? WHERE id=?`, r.Status, r.PlanJSON, r.AutoApprovedAtMS, r.InputTokens, r.OutputTokens, r.ErrorCode, r.ErrorMessage, r.StartedAtMS, r.FinishedAtMS, r.ID)
+	_, e := db.ExecContext(ctx, `UPDATE ai_runs SET bot_id=?,site_id=?,status=?,plan_json=?,auto_approved_at_ms=?,input_tokens=?,output_tokens=?,error_code=?,error_message=?,started_at_ms=?,finished_at_ms=? WHERE id=?`, r.BotID, r.SiteID, r.Status, r.PlanJSON, r.AutoApprovedAtMS, r.InputTokens, r.OutputTokens, r.ErrorCode, r.ErrorMessage, r.StartedAtMS, r.FinishedAtMS, r.ID)
 	return e
 }
 
@@ -311,11 +341,14 @@ func (db *DB) CountActiveAIRuns(ctx context.Context, userID, targetKind, targetI
 	if error != nil {
 		return
 	}
+	if targetID == "" {
+		return // a run with no target shares no per-target cap
+	}
 	col := "bot_id"
 	if targetKind == "site" {
 		col = "site_id"
 	}
-	error = db.QueryRowContext(ctx, `SELECT count(*) FROM ai_runs r JOIN ai_conversations c ON c.id=r.conversation_id WHERE c.`+col+`=? AND r.status IN ('queued','running','waiting_approval')`, targetID).Scan(&target)
+	error = db.QueryRowContext(ctx, `SELECT count(*) FROM ai_runs WHERE `+col+`=? AND status IN ('queued','running','waiting_approval')`, targetID).Scan(&target)
 	return
 }
 

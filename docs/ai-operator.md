@@ -1,9 +1,55 @@
-# AI operator
+# AI assistant (AI operator)
 
-BotForge’s AI operator is a private incident workspace attached to one bot or
-one hosted site. It uses administrator-configured OpenAI-compatible Chat
-Completions providers (DeepSeek is the first preset) and never disables normal
-hosting when no provider is configured.
+BotForge’s AI assistant is one private chat for the whole panel. It opens from
+the **Ask AI** button at the bottom right of every page and from the sparkle
+button in the header (`Ctrl+.`). It uses administrator-configured
+OpenAI-compatible Chat Completions providers (DeepSeek is the first preset) and
+never disables normal hosting when no provider is configured.
+
+## One chat that follows you
+
+The chat is not tied to a bot. Every message carries **what you were looking
+at**: the bot or site, the tab or section in view, and for the file editor the
+open file. A chip above the message box shows exactly what is shared and can be
+dismissed for a single question; each sent message keeps its chip in the
+transcript. Moving to another bot or page keeps the same conversation and
+attaches the new context to the next message.
+
+* The browser describes the page, but the server trusts only the bot or site
+  **id**. It authorizes that id for the person, replaces any browser-supplied
+  name with the real one, and clips everything else to short plain text. A bot
+  the person cannot open cannot be named as context.
+* The target of a run is fixed when it starts and is stored with the run. With
+  no bot or site in view, the assistant answers general questions and can call
+  `list_targets` and `focus_target` to look at one of the person’s bots in
+  Approval mode. A run that already has a target cannot move to another, and
+  **Auto repair requires a target**, so an approval always covers one bot or
+  site.
+* Conversations belong to their creator and are private, including from
+  administrators. Chats created through the older per-bot and per-site
+  endpoints keep working and keep their target.
+* The system prompt gives the assistant its role, a debugging method (status,
+  console output, build output, then files), safe-use rules for secrets and
+  untrusted text, what it cannot do, and the current context.
+
+## Tools
+
+| Tool | Reads or changes | Needs |
+| --- | --- | --- |
+| `target_status` | State, last exit code, last error, startup argv | Access to the bot or site |
+| `read_logs` | The last 20–500 lines of the bot’s console output (secrets redacted) | Console permission |
+| `build_output` | Recent builds/deployments/backups and the tail of one operation’s output | Console permission |
+| `list_files`, `read_file`, `search_files` | Permitted workspace text | Access |
+| `environment_names` | Variable names only | Access |
+| `list_targets`, `focus_target` | The bots and sites the person can open; scope a target-less run | Access |
+| `web_search`, `web_fetch` | Public research | Administrator enabled |
+| `request_environment_values` | Secure form; values bypass the model | Environment permission, user input |
+| `propose_file_change` | One text file, with diff and Undo | File permission, approval |
+| `run_diagnostic` | One allowlisted command in an offline container | File permission, approval |
+| `restart_bot` | Restart | Power permission, approval |
+
+`read_logs` and `build_output` are what make debugging possible: the assistant
+sees the crash, not just the files.
 
 ## Modes and approvals
 
@@ -48,12 +94,13 @@ whether or not a card was approved: `ai.file_apply` (path), `ai.diagnostic`
 and failed attempts are recorded as `denied`/`failed`. Chat requests,
 approvals, secure input and undo are recorded as well.
 
-### Restoring the inspector
+### Restoring the chat
 
 `GET /api/v1/ai/conversations/:id/runs` returns the latest runs (default 5, at
-most 20 with `?limit=`) with their tool calls and change sets. The run inspector
-uses it after a reload and when a run finishes, so pending approvals,
-secure-input cards, diffs and Undo stay available. Tool-call rows have their own
+most 20 with `?limit=`) with their tool calls and change sets, each run’s target
+and its start event. Runs whose bot or site the person can no longer open are
+left out. The chat uses it after a reload and when a run finishes, so pending
+approvals, secure-input cards, diffs and Undo stay available. Tool-call rows have their own
 UUIDs; the provider's call id is kept separately and only echoed back to the
 provider. Live event streams of finished runs are dropped after five minutes.
 
@@ -90,8 +137,10 @@ forms.
 
 ## Data and permission boundary
 
-Conversations belong to their creator; administrators may inspect them. They
-expire after 90 inactive days or can be deleted manually. Deletion removes
+Conversations belong to their creator. A chat with no target is private even
+from administrators; administrators can still inspect the conversations that
+older per-target endpoints created. Chats expire after 90 inactive days or can be
+deleted manually. Deletion removes
 messages, tool output and undo snapshots while audit events remain.
 
 The model may receive bounded, explicitly requested safe file snippets, status,
@@ -119,12 +168,21 @@ for recoverable renames. A concurrent editor, SFTP write or deployment causes a
 conflict instead of being overwritten. Undo likewise requires the retained
 after-revision to still match.
 
-Diagnostics use the runtime’s administrator-controlled YAML argv prefixes.
-The container mounts only a private safe snapshot, receives no bot environment,
+Diagnostics use the runtime’s administrator-controlled YAML argv prefixes
+(`diagnostic_commands` in `runtimes/*.yaml`). The defaults cover version checks,
+syntax checks, the test/lint/build scripts and running the bot’s entry file
+(`node index.js`, `python main.py`, …) so startup, import and syntax errors
+surface; `python3` is treated as `python`. The tool description lists the
+allowed prefixes for the focused bot’s runtime, and a refused command returns
+the full list plus a pointer to `read_file`, `read_logs` and `build_output`, so
+the model corrects itself instead of retrying a shell command. The container mounts only a private safe snapshot, receives no bot environment,
 ports, Docker socket, devices or extra mounts, and runs non-root with a
 read-only root, dropped capabilities, `no-new-privileges`, PID/CPU/memory/tmpfs
 limits and `NetworkMode=none`. Arguments are direct argv; shell syntax,
-interpreter eval and paths escaping `/workspace` are rejected. The default
+interpreter eval (`node -e/-p`, `python -c`, `ruby -e`) and paths escaping
+`/workspace` are rejected. The snapshot skips symbolic links, so tools that
+rely on `node_modules/.bin` links need to be run through a script that calls
+them by path, and it is capped at 60,000 files and 512 MiB. The default
 timeout is ten minutes and the hard ceiling is twenty.
 
 This isolation is enforced by the application plus the existing Docker runtime

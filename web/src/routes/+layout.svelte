@@ -13,6 +13,8 @@
 	import Menu from '$lib/components/ui/Menu.svelte';
 	import OperationShelf from '$lib/components/OperationShelf.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import AIChat from '$lib/components/AIChat.svelte';
+	import { chat } from '$lib/ai/chat.svelte';
 	import { theme, cycleTheme } from '$lib/ui/theme.svelte';
 	import { describe } from '$lib/status';
 	import WorkspaceSwitcher from '$lib/components/WorkspaceSwitcher.svelte';
@@ -204,6 +206,7 @@
 					<a href="/dashboard" class="flex items-center gap-2 lg:hidden" aria-label="BotForge dashboard"><img src="/favicon.svg" alt="" width="26" height="26" class="rounded-tile" /></a>
 					<p class="hidden truncate text-title text-muted sm:block">Welcome back, <span class="font-semibold text-ink">{who}</span></p>
 					<div class="ml-auto flex items-center gap-1.5">
+						{#if session.features.ai}<button class="tb-btn {chat.open ? 'text-action' : ''}" onclick={() => chat.toggle()} aria-label="Ask AI (Ctrl+.)" aria-pressed={chat.open} title="Ask AI (Ctrl+.)"><Icon name="sparkle" size={17} /></button>{/if}
 						<button class="tb-btn" onclick={() => (palette = true)} aria-label="Go to a bot or page (Ctrl+K)" title="Go to (Ctrl+K)"><Icon name="search" size={17} /></button>
 						<a class="tb-btn hidden sm:grid" href="/activity" aria-label="Activity" title="Activity"><Icon name="history" size={17} /></a>
 						<button class="tb-btn" onclick={cycleTheme} aria-label="{themeLabel}. Switch theme" title="{themeLabel} · click to switch">
@@ -233,6 +236,7 @@
 
 	<OperationShelf />
 	<CommandPalette bind:open={palette} />
+	<AIChat />
 {:else if session.loaded && PUBLIC.includes(path)}
 	{@render children()}
 {:else if !session.loaded}

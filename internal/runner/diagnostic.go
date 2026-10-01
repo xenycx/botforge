@@ -48,6 +48,12 @@ func (d *Diagnostic) RunDiagnostic(ctx context.Context, botID, runtimeID string,
 	if root == "" {
 		root = os.TempDir()
 	}
+	// Docker refuses relative bind-mount sources, and a development panel runs
+	// with a relative data directory.
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return out, err
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return out, err
 	}
@@ -123,13 +129,18 @@ func validateDiagnostic(rt runtimes.Runtime, argv []string) error {
 	if len(argv) == 0 || len(argv) > 20 {
 		return domain.Invalid("diagnostic argv is empty or too long")
 	}
+	// python3 is the same interpreter as python for policy purposes.
+	head := argv[0]
+	if head == "python3" {
+		head = "python"
+	}
 	allowed := false
 	for _, p := range rt.DiagnosticCommands {
-		if len(argv) < len(p) {
+		if len(argv) < len(p) || p[0] != head {
 			continue
 		}
 		same := true
-		for i := range p {
+		for i := 1; i < len(p); i++ {
 			if argv[i] != p[i] {
 				same = false
 				break
@@ -141,15 +152,14 @@ func validateDiagnostic(rt runtimes.Runtime, argv []string) error {
 		}
 	}
 	if !allowed {
-		return domain.Invalid("that diagnostic command is not allowed by the runtime policy")
+		return domain.Invalid(notAllowedMessage(rt))
+	}
+	if interpreterEval(head, argv[1:]) {
+		return domain.Invalid("interpreter evaluation flags are not allowed")
 	}
 	for i, a := range argv {
 		if a == "" || len(a) > 500 || strings.ContainsAny(a, "\x00\r\n") {
 			return domain.Invalid("diagnostic argument is invalid")
-		}
-		low := strings.ToLower(a)
-		if (argv[0] == "node" || argv[0] == "python" || argv[0] == "python3" || argv[0] == "ruby") && (low == "-e" || low == "--eval" || low == "-c" && argv[0] != "ruby") {
-			return domain.Invalid("interpreter evaluation flags are not allowed")
 		}
 		if strings.HasPrefix(a, "/") && !strings.HasPrefix(a, "/workspace/") && a != "/workspace" {
 			return domain.Invalid("diagnostic paths must stay inside /workspace")
@@ -164,6 +174,46 @@ func validateDiagnostic(rt runtimes.Runtime, argv []string) error {
 		}
 	}
 	return nil
+}
+
+// interpreterEval reports arguments that would run code given on the command
+// line instead of a file in the workspace.
+func interpreterEval(head string, args []string) bool {
+	for _, a := range args {
+		a = strings.ToLower(a)
+		switch head {
+		case "node":
+			if a == "-e" || a == "--eval" || a == "-p" || a == "--print" || a == "-pe" || strings.HasPrefix(a, "--eval=") || strings.HasPrefix(a, "--print=") || strings.HasPrefix(a, "--input-type") {
+				return true
+			}
+		case "ruby":
+			if a == "-e" {
+				return true
+			}
+		case "python":
+			if a == "-m" {
+				return false // what follows belongs to the module
+			}
+			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// notAllowedMessage tells the caller exactly what is allowed, so a model that
+// asked for a shell command can pick a real one instead of guessing again.
+func notAllowedMessage(rt runtimes.Runtime) string {
+	var prefixes []string
+	for _, p := range rt.DiagnosticCommands {
+		prefixes = append(prefixes, strings.Join(p, " "))
+	}
+	name := rt.DisplayName
+	if name == "" {
+		name = rt.ID
+	}
+	return fmt.Sprintf("that command is not allowed for the %s runtime. Allowed command prefixes (arguments such as file paths may follow): %s. It is not a shell, so pipes, ls, cat and grep do not work: use read_file, list_files, search_files, read_logs and build_output to inspect instead", name, strings.Join(prefixes, "; "))
 }
 
 func copyDiagnosticSnapshot(m *filesystem.Manager, botID, dst string) error {
@@ -207,7 +257,7 @@ func copyDiagnosticSnapshot(m *filesystem.Manager, botID, dst string) error {
 			}
 			files++
 			total += x.Size
-			if files > 10000 || total > 128<<20 {
+			if files > 60000 || total > 512<<20 {
 				return errors.New("safe diagnostic snapshot exceeds its file or byte limit")
 			}
 			b, e := w.Read(p, 1<<20)

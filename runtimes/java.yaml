@@ -24,6 +24,9 @@ build_argv:
 default_argv: [java, -XX:MaxRAMPercentage=60, -jar, app.jar]
 allowed_commands: [java]
 diagnostic_commands:
+  - [java, -version]
+  - [java, --version]
+  - [javac, -version]
   - [javac]
   - [.maven/bin/mvn, test]
   - [.maven/bin/mvn, verify]

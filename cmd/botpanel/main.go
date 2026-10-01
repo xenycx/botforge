@@ -644,7 +644,11 @@ func serve(log *slog.Logger) error {
 	dsrc := diagSources{cfg: cfg, db: db, files: wsm, catalog: catalog, keys: keys, runnerStatus: runnerStatus,
 		oauth: enabledOAuth, knownSchema: migrationCount(migs)}
 	diagnostics := func(ctx context.Context) diag.Report { return diag.Run(ctx, version, started, probes(dsrc)) }
-	aiSvc := &service.AIService{Store: db, Keys: keys, Bots: botSvc, Sites: sitesSvc, Files: wsm, Ops: ops, Audit: audit, Diagnostic: aiDiagnostic, Log: log}
+	var aiLogs service.LogTail
+	if dk != nil {
+		aiLogs = dk
+	}
+	aiSvc := &service.AIService{Store: db, Keys: keys, Bots: botSvc, Sites: sitesSvc, Files: wsm, Ops: ops, Audit: audit, Diagnostic: aiDiagnostic, Logs: aiLogs, Log: log}
 	aiSvc.Start(ctx)
 	app := api.New(api.Deps{Diagnostics: diagnostics, Log: log, Deploy: deploySvc, Backups: backupSvc, Stats: statsSrc, SFTP: sftpInfo, Analytics: analytics, PublicURL: cfg.PublicURL, DB: db, UI: webui.FS(), Auth: authSvc, Bots: botSvc, OAuth: oauthSvc,
 		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, MetricsToken: cfg.MetricsToken, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,

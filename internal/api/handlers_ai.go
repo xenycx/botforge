@@ -27,6 +27,12 @@ func (s *server) aiRoutes(r fiber.Router) {
 	r.Put("/admin/ai/search", s.requireAdmin, s.aiPutSearchSettings)
 	r.Post("/admin/ai/search/test", s.requireAdmin, s.aiTestSearch)
 
+	// One chat for the whole panel. The bot or site a message is about travels
+	// with the message, not with the conversation.
+	r.Get("/ai/conversations", s.aiMyConversations)
+	r.Post("/ai/conversations", s.aiCreateConversation)
+
+	// Per-target conversations predate the global chat and keep working.
 	r.Get("/bots/:id/ai/conversations", s.aiListBotConversations)
 	r.Post("/bots/:id/ai/conversations", s.aiCreateBotConversation)
 	r.Get("/sites/:sid/ai/conversations", s.aiListSiteConversations)
@@ -142,8 +148,9 @@ type aiPatchConversationInput struct {
 	Model      *string `json:"model"`
 }
 type aiMessageInput struct {
-	Content string `json:"content"`
-	Mode    string `json:"mode"`
+	Content string             `json:"content"`
+	Mode    string             `json:"mode"`
+	Context *service.AIContext `json:"context"`
 }
 
 func conversationJSON(v domain.AIConversation) fiber.Map {
@@ -152,13 +159,37 @@ func conversationJSON(v domain.AIConversation) fiber.Map {
 func messageJSON(v domain.AIMessage) fiber.Map {
 	var citations any = []any{}
 	_ = json.Unmarshal([]byte(v.CitationsJSON), &citations)
-	return fiber.Map{"id": v.ID, "conversation_id": v.ConversationID, "role": v.Role, "content": v.Content, "citations": citations, "created_at_ms": v.CreatedAtMS}
+	var view any = fiber.Map{}
+	_ = json.Unmarshal([]byte(v.ContextJSON), &view)
+	return fiber.Map{"id": v.ID, "conversation_id": v.ConversationID, "role": v.Role, "content": v.Content, "citations": citations, "context": view, "created_at_ms": v.CreatedAtMS}
 }
 func runJSON(v domain.AIRun) fiber.Map {
 	var limits, plan any
 	_ = json.Unmarshal([]byte(v.LimitsJSON), &limits)
 	_ = json.Unmarshal([]byte(v.PlanJSON), &plan)
-	return fiber.Map{"id": v.ID, "conversation_id": v.ConversationID, "user_id": v.UserID, "provider_id": v.ProviderID, "model": v.Model, "mode": v.Mode, "status": v.Status, "limits": limits, "plan": plan, "auto_approved_at_ms": v.AutoApprovedAtMS, "input_tokens": v.InputTokens, "output_tokens": v.OutputTokens, "error_code": v.ErrorCode, "error_message": v.ErrorMessage, "created_at_ms": v.CreatedAtMS, "started_at_ms": v.StartedAtMS, "finished_at_ms": v.FinishedAtMS}
+	return fiber.Map{"id": v.ID, "conversation_id": v.ConversationID, "user_id": v.UserID, "bot_id": v.BotID, "site_id": v.SiteID, "provider_id": v.ProviderID, "model": v.Model, "mode": v.Mode, "status": v.Status, "limits": limits, "plan": plan, "auto_approved_at_ms": v.AutoApprovedAtMS, "input_tokens": v.InputTokens, "output_tokens": v.OutputTokens, "error_code": v.ErrorCode, "error_message": v.ErrorMessage, "created_at_ms": v.CreatedAtMS, "started_at_ms": v.StartedAtMS, "finished_at_ms": v.FinishedAtMS}
+}
+func (s *server) aiMyConversations(c fiber.Ctx) error {
+	v, e := s.ai.MyConversations(c.Context(), currentUser(c))
+	if e != nil {
+		return e
+	}
+	out := make([]fiber.Map, len(v))
+	for i, x := range v {
+		out[i] = conversationJSON(x)
+	}
+	return c.JSON(fiber.Map{"conversations": out})
+}
+func (s *server) aiCreateConversation(c fiber.Ctx) error {
+	var in aiConversationInput
+	if e := decode(c, &in); e != nil {
+		return e
+	}
+	v, e := s.ai.CreateConversation(c.Context(), currentUser(c), nil, nil, in.Title)
+	if e != nil {
+		return e
+	}
+	return c.Status(fiber.StatusCreated).JSON(conversationJSON(v))
 }
 func (s *server) aiListBotConversations(c fiber.Ctx) error {
 	id := strings.Clone(c.Params("id"))
@@ -265,7 +296,7 @@ func (s *server) aiMessage(c fiber.Ctx) error {
 	if e := decode(c, &in); e != nil {
 		return e
 	}
-	r, e := s.ai.StartMessage(c.Context(), currentUser(c), strings.Clone(c.Params("conversation")), in.Content, in.Mode)
+	r, e := s.ai.StartMessage(c.Context(), currentUser(c), strings.Clone(c.Params("conversation")), in.Content, in.Mode, in.Context)
 	if e != nil {
 		return e
 	}

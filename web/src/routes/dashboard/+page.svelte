@@ -226,7 +226,7 @@
 
 	function menuFor(b: Bot): MenuItem[] {
 		const items: MenuItem[] = [{ label: 'Open', onselect: () => goto(`/bots/${b.id}`) }];
-		if (can(b, Perm.console)) items.push({ label: 'Console', onselect: () => goto(`/bots/${b.id}?tab=console`) });
+		if (can(b, Perm.console)) items.push({ label: 'Console', onselect: () => goto(`/bots/${b.id}?tab=manage`) });
 		if (can(b, Perm.files)) items.push({ label: 'Files', onselect: () => goto(`/bots/${b.id}?tab=files`) });
 		if (can(b, Perm.power) && session.features.runner) {
 			items.push('separator');

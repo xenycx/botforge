@@ -1,11 +1,10 @@
 # Platform overhaul implementation status
 
-Updated 2026-10-01 for BotForge 0.2.0 plus the Unreleased changes in
-`CHANGELOG.md`. This is the durable checklist for the requested platform
+Updated 2026-10-01 for BotForge 0.3.0 (see `CHANGELOG.md`). This is the durable checklist for the requested platform
 overhaul. A checked item is implemented in the current working tree; partial
 items state exactly what remains.
 
-## Completed since 0.2.0 (Unreleased)
+## Completed in 0.3.0 and since 0.2.0
 
 - [x] Team workspaces with owner/admin/developer/viewer roles, a personal
   workspace per account, moving bots between workspaces, and a sidebar
@@ -54,8 +53,25 @@ items state exactly what remains.
   Startup, deploy and site-publish tools were **not** implemented; the
   operator has no such tools and the documentation no longer claims them.
 
+- [x] AI assistant as one panel-wide chat instead of a per-bot/per-site
+  workspace: the Ask AI window follows the person across pages and every
+  message carries its context (bot or site id authorized and named by the
+  server, section, open file). Runs store their own target; `list_targets` /
+  `focus_target` let a target-less run open one of the person's bots in
+  Approval mode, and Auto repair requires a target. New tools `read_logs` and
+  `build_output` give it the crash and build output. Enforcement: target
+  authorization, per-run target pinning and run limits are application-level.
+- [x] Diagnostics fixed: the runner's reconciler used to treat an AI
+  diagnostic container (labelled with the bot id) as a stale duplicate of the
+  bot and stop it (exit 137, no logs); diagnostic containers are now excluded
+  from reconciliation and orphans are swept on resync. A relative data
+  directory no longer breaks the scratch bind mount. Runtime allowlists now
+  include version/syntax checks and running the entry file, and a refusal lists
+  what is allowed. Enforcement: policy is application-level; isolation is
+  Docker-runtime-level.
+
 Migrations added since 0.2.0 (the schema-version assertion in
-`internal/store/sqlite/db_test.go` is 29):
+`internal/store/sqlite/db_test.go` is 30):
 
 | Migration | Purpose |
 | --- | --- |
@@ -65,6 +81,7 @@ Migrations added since 0.2.0 (the schema-version assertion in
 | `0027_bot_sites.sql` | One-to-one bot/site links, generated-page presentation, custom HTML/CSS and public-widget opt-in |
 | `0028_ai_operator.sql` | Encrypted provider profiles, target chats, runs, tools, change/undo snapshots and site-aware audit identity |
 | `0029_ai_tool_call_ids.sql` | `ai_tool_calls.provider_call_id`; rows are keyed by panel UUIDs (existing rows keep their id) |
+| `0030_ai_global_chat.sql` | Rebuilds `ai_conversations` so a chat may have no target; `ai_runs.bot_id`/`site_id`, `ai_messages.context_json` (the conversation subtree is stashed and restored, rows preserved) |
 
 Known gaps in this work:
 
