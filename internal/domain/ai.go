@@ -55,6 +55,7 @@ type AIRun struct {
 
 type AIToolCall struct {
 	ID, RunID, Name, ArgumentsJSON, Output string
+	ProviderCallID                         *string // the provider's id, echoed only in the tool-result message
 	CallIndex                              int64
 	ApprovalState, Status                  string
 	ExitCode, DurationMS                   *int64

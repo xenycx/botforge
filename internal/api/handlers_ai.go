@@ -34,6 +34,7 @@ func (s *server) aiRoutes(r fiber.Router) {
 	r.Get("/ai/conversations/:conversation", s.aiConversation)
 	r.Patch("/ai/conversations/:conversation", s.aiPatchConversation)
 	r.Delete("/ai/conversations/:conversation", s.aiDeleteConversation)
+	r.Get("/ai/conversations/:conversation/runs", s.aiConversationRuns)
 	r.Post("/ai/conversations/:conversation/messages", s.aiMessage)
 	r.Get("/ai/runs/:run", s.aiRun)
 	r.Get("/ai/runs/:run/stream", s.aiStreamGuard, fws.New(s.aiStream, fws.Config{ReadBufferSize: 1024, WriteBufferSize: 4096}))
@@ -44,7 +45,13 @@ func (s *server) aiRoutes(r fiber.Router) {
 	r.Post("/ai/change-sets/:change/revert", s.aiRevertChangeSet)
 }
 
-func (s *server) aiAvailableProviders(c fiber.Ctx) error { v,e:=s.ai.AvailableProviders(c.Context());if e!=nil{return e};return c.JSON(fiber.Map{"providers":v}) }
+func (s *server) aiAvailableProviders(c fiber.Ctx) error {
+	v, e := s.ai.AvailableProviders(c.Context())
+	if e != nil {
+		return e
+	}
+	return c.JSON(fiber.Map{"providers": v})
+}
 
 func (s *server) aiProviders(c fiber.Ctx) error {
 	v, e := s.ai.Providers(c.Context(), currentUser(c))
@@ -206,6 +213,30 @@ func (s *server) aiConversation(c fiber.Ctx) error {
 		msgs[i] = messageJSON(x)
 	}
 	return c.JSON(fiber.Map{"conversation": conversationJSON(v), "messages": msgs})
+}
+
+// aiConversationRuns restores the run inspector: the latest runs with their
+// tool calls (approvals and secure-input requests included) and change sets.
+func (s *server) aiConversationRuns(c fiber.Ctx) error {
+	limit := 5
+	if v := c.Query("limit"); v != "" {
+		n, e := strconv.Atoi(v)
+		if e != nil || n < 1 || n > 20 {
+			return domain.Invalid("limit must be between 1 and 20")
+		}
+		limit = n
+	}
+	v, e := s.ai.ConversationRuns(c.Context(), currentUser(c), strings.Clone(c.Params("conversation")), limit)
+	if e != nil {
+		return e
+	}
+	out := make([]fiber.Map, len(v))
+	for i, d := range v {
+		m := runJSON(d.Run)
+		m["tool_calls"], m["change_sets"] = d.ToolCalls, d.ChangeSets
+		out[i] = m
+	}
+	return c.JSON(fiber.Map{"runs": out})
 }
 func (s *server) aiPatchConversation(c fiber.Ctx) error {
 	var in aiPatchConversationInput

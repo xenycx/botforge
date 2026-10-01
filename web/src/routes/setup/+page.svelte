@@ -9,7 +9,7 @@
 
 	// First-run setup: runs only while the installation has no account, and
 	// only with the setup code the server printed in its log.
-	const steps = ['Setup code', 'Administrator', 'Panel address', 'GitHub', 'Discord', 'Finish'];
+	const steps = ['Setup code', 'Administrator', 'Panel address', 'GitHub', 'Discord', 'AI operator', 'Finish'];
 	let step = $state(0);
 	let codeFile = $state('');
 	let done = $state(false);
@@ -28,6 +28,12 @@
 	let dcId = $state('');
 	let dcSecret = $state('');
 	let allowSignup = $state(false);
+	// Optional first AI operator provider (an OpenAI-compatible endpoint).
+	let useAI = $state(false);
+	let aiName = $state('DeepSeek');
+	let aiBaseUrl = $state('https://api.deepseek.com');
+	let aiModel = $state('deepseek-chat');
+	let aiKey = $state('');
 
 	onMount(async () => {
 		publicUrl = location.origin;
@@ -63,6 +69,7 @@
 		}
 		if (step === 3 && useGitHub && (!ghId.trim() || !ghSecret.trim())) return (error = 'Paste both the client ID and the secret, or skip GitHub.');
 		if (step === 4 && useDiscord && (!dcId.trim() || !dcSecret.trim())) return (error = 'Paste both the client ID and the secret, or skip Discord.');
+		if (step === 5 && useAI && (!aiName.trim() || !aiBaseUrl.trim() || !aiModel.trim() || !aiKey.trim())) return (error = 'Fill in the provider, address, model and API key, or skip the AI operator.');
 		step = Math.min(step + 1, steps.length - 1);
 	}
 
@@ -73,7 +80,10 @@
 		if (useGitHub) Object.assign(settings, { github_client_id: ghId.trim(), github_client_secret: ghSecret.trim() });
 		if (useDiscord) Object.assign(settings, { discord_client_id: dcId.trim(), discord_client_secret: dcSecret.trim() });
 		try {
-			const r = await api<{ csrf_token: string; settings_error?: string }>('POST', '/setup/complete', { code, email, password, settings });
+			const body: Record<string, unknown> = { code, email, password, settings };
+			if (useAI) body.ai_provider = { name: aiName.trim(), base_url: aiBaseUrl.trim(), default_model: aiModel.trim(), key: aiKey.trim(), max_output_tokens: 4096, timeout_ms: 120000 };
+			const r = await api<{ csrf_token: string; settings_error?: string }>('POST', '/setup/complete', body);
+			aiKey = '';
 			setCsrf(r.csrf_token);
 			await loadSession();
 			if (r.settings_error) sessionStorage.setItem('botpanel.setupWarning', r.settings_error);
@@ -121,7 +131,7 @@
 							<div>
 								<p class="eyebrow">Welcome</p>
 								<h1 class="mt-2 text-page">Let's set up your panel<span class="text-action">.</span></h1>
-								<p class="mt-2 max-w-prose text-muted">A few minutes: an administrator account, the address people use to reach this panel, and (optionally) GitHub and Discord sign-in. You can change everything later.</p>
+								<p class="mt-2 max-w-prose text-muted">A few minutes: an administrator account, the address people use to reach this panel, and (optionally) GitHub and Discord sign-in and an AI operator provider. You can change everything later.</p>
 							</div>
 							<label class="block max-w-md">
 								<span class="label">Setup code</span>
@@ -184,6 +194,23 @@
 									<span>Let new people create an account by signing in with {useGitHub && useDiscord ? 'GitHub or Discord' : useGitHub ? 'GitHub' : 'Discord'}<span class="help">Off: only accounts you create can sign in. Accounts are never merged by email.</span></span>
 								</label>
 							{/if}
+						{:else if step === 5}
+							<div class="flex flex-wrap items-start justify-between gap-3">
+								<div>
+									<p class="eyebrow">Step 6 · optional</p>
+									<h2 class="mt-2 flex items-center gap-2 text-section"><Icon name="bolt" size={20} />AI operator</h2>
+									<p class="mt-1 max-w-prose text-muted">An incident assistant inside each bot and site. It needs an OpenAI-compatible provider (DeepSeek is filled in). Hosting works without it, and you can add or change providers later under Administration → Panel settings.</p>
+								</div>
+								<label class="flex items-center gap-2 font-medium"><input type="checkbox" bind:checked={useAI} />Set up the AI operator</label>
+							</div>
+							{#if useAI}
+								<div class="grid max-w-2xl gap-3 rounded-overlay border border-rule-soft bg-paper p-4 sm:grid-cols-2 sm:p-5">
+									<label class="block"><span class="label">Provider name</span><input class="field" maxlength="80" bind:value={aiName} /></label>
+									<label class="block"><span class="label">Model ID</span><input class="field font-mono" bind:value={aiModel} /></label>
+									<label class="block sm:col-span-2"><span class="label">Base API URL</span><input class="field font-mono" bind:value={aiBaseUrl} /></label>
+									<label class="block sm:col-span-2"><span class="label">API key</span><input class="field" type="password" autocomplete="new-password" bind:value={aiKey} /><span class="help">Encrypted with this server's key and never shown again.</span></label>
+								</div>
+							{/if}
 						{:else}
 							<div>
 								<p class="eyebrow">Ready</p>
@@ -194,6 +221,7 @@
 								<dt class="text-muted">Panel address</dt><dd class="truncate font-mono text-small">{publicUrl}</dd>
 								<dt class="text-muted">GitHub</dt><dd>{useGitHub ? `Client ${ghId}` : 'Not now'}</dd>
 								<dt class="text-muted">Discord</dt><dd>{useDiscord ? `Client ${dcId}` : 'Not now'}</dd>
+								<dt class="text-muted">AI operator</dt><dd class="truncate">{useAI ? `${aiName} · ${aiModel}` : 'Not now'}</dd>
 								<dt class="text-muted">Sign-up</dt><dd>{allowSignup && (useGitHub || useDiscord) ? 'New people may create accounts' : 'Only accounts you create'}</dd>
 							</dl>
 							<p class="max-w-prose text-small text-muted">Secrets are stored encrypted with this server's key. Values in the environment file always win over these.</p>
@@ -204,8 +232,8 @@
 						<div class="flex items-center gap-2 border-t border-rule-soft pt-5">
 							{#if step > 0}<button type="button" class="btn" onclick={() => ((step -= 1), (error = ''))}><Icon name="chevronLeft" size={14} />Back</button>{/if}
 							<span class="flex-1"></span>
-							{#if step === 3 || step === 4}
-								<button type="button" class="btn btn-quiet" onclick={() => { if (step === 3) useGitHub = false; else useDiscord = false; error = ''; step += 1; }}>Skip</button>
+							{#if step === 3 || step === 4 || step === 5}
+								<button type="button" class="btn btn-quiet" onclick={() => { if (step === 3) useGitHub = false; else if (step === 4) useDiscord = false; else useAI = false; error = ''; step += 1; }}>Skip</button>
 							{/if}
 							{#if step < steps.length - 1}
 								<button class="btn btn-primary" disabled={busy}>Continue<Icon name="chevronRight" size={14} /></button>

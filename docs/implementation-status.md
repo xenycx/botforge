@@ -41,15 +41,21 @@ items state exactly what remains.
   limits, protected paths and SSRF checks are application-level; resource,
   mount, capability and network isolation are Docker-runtime-level. The
   separate privileged `botrunner` daemon is not implemented (`docs/ai-operator.md`).
-  Not yet enforced or missing: Auto-mode limits other than rounds and wall
-  time (diagnostics, applies, lifecycle actions, changed files/bytes, retained
-  output); audit records for actions the model takes without a request in Auto
-  mode; DNS-rebinding-safe fetching (IPs are checked before, not at, connect);
-  startup, deploy and site-publish tools; run/tool/change-set history after a
-  page reload; and full provider editing in the settings UI.
+- [x] AI operator follow-ups: every run limit (rounds, wall time, diagnostics,
+  apply attempts, lifecycle actions, changed files/bytes, retained output) is
+  enforced per run in both modes; model-initiated file applies, diagnostics,
+  restarts and secure environment input are audited in Auto mode too;
+  research checks addresses at connect time (DNS rebinding and redirects,
+  `100.64.0.0/10` blocked) while allowing a private self-hosted search origin;
+  `GET /api/v1/ai/conversations/:id/runs` restores runs, approvals,
+  secure-input cards, change sets and Undo after a reload; tool-call rows use
+  panel UUIDs; finished run streams are dropped after five minutes; providers
+  are fully editable in Administration and the first key can be set in `/setup`.
+  Startup, deploy and site-publish tools were **not** implemented; the
+  operator has no such tools and the documentation no longer claims them.
 
 Migrations added since 0.2.0 (the schema-version assertion in
-`internal/store/sqlite/db_test.go` is 28):
+`internal/store/sqlite/db_test.go` is 29):
 
 | Migration | Purpose |
 | --- | --- |
@@ -58,8 +64,12 @@ Migrations added since 0.2.0 (the schema-version assertion in
 | `0026_static_sites.sql` | Sites, releases and custom domains |
 | `0027_bot_sites.sql` | One-to-one bot/site links, generated-page presentation, custom HTML/CSS and public-widget opt-in |
 | `0028_ai_operator.sql` | Encrypted provider profiles, target chats, runs, tools, change/undo snapshots and site-aware audit identity |
+| `0029_ai_tool_call_ids.sql` | `ai_tool_calls.provider_call_id`; rows are keyed by panel UUIDs (existing rows keep their id) |
 
 Known gaps in this work:
+
+- [ ] The AI operator has no tools for startup-command changes, deployments or
+  site publication; those stay manual.
 
 - [ ] Site release files are not included in `botpanel backup`/`restore`.
 - [ ] Sites have no automation-API upload route, redirects/headers files,

@@ -46,15 +46,18 @@ type AIStore interface {
 	ListAIMessages(context.Context, string, int) ([]domain.AIMessage, error)
 	InsertAIRun(context.Context, domain.AIRun) error
 	GetAIRun(context.Context, string) (domain.AIRun, error)
+	ListAIRuns(context.Context, string, int) ([]domain.AIRun, error)
 	UpdateAIRun(context.Context, domain.AIRun) error
 	InterruptAIRuns(context.Context, int64) (int64, error)
 	PruneAIConversations(context.Context, int64, int) (int64, error)
 	InsertAIToolCall(context.Context, domain.AIToolCall) error
 	GetAIToolCall(context.Context, string) (domain.AIToolCall, error)
+	ListAIToolCalls(context.Context, string) ([]domain.AIToolCall, error)
 	UpdateAIToolCall(context.Context, domain.AIToolCall) error
 	CountActiveAIRuns(context.Context, string, string, string) (int, int, int, error)
 	InsertAIChangeSet(context.Context, domain.AIChangeSet) error
 	GetAIChangeSet(context.Context, string) (domain.AIChangeSet, error)
+	ListAIChangeSets(context.Context, string) ([]domain.AIChangeSet, error)
 	UpdateAIChangeSet(context.Context, domain.AIChangeSet) error
 	Settings(context.Context) (map[string]domain.Setting, error)
 	PutSettings(context.Context, []domain.Setting, int64) error
@@ -77,6 +80,61 @@ type AIRunLimits struct {
 }
 
 func DefaultAIRunLimits() AIRunLimits { return AIRunLimits{12, 5, 3, 2, 20, 32, 8 << 20, 2 << 20} }
+
+// aiBudget counts what one run has consumed against its limits. Every mode
+// uses it; approvals never raise a limit. A run executes one tool at a time,
+// so it needs no lock.
+type aiBudget struct {
+	lim                             AIRunLimits
+	diagnostics, applies, lifecycle int
+	files                           map[string]bool
+	bytes, output                   int64
+}
+
+func newAIBudget(lim AIRunLimits) *aiBudget { return &aiBudget{lim: lim, files: map[string]bool{}} }
+
+func limitReached(what string, n any) error {
+	return domain.Invalid(fmt.Sprintf("run limit reached: at most %v %s per run; summarize the findings and stop or ask the user to start a new run", n, what))
+}
+func (b *aiBudget) diagnostic() error {
+	if b.diagnostics >= b.lim.Diagnostics {
+		return limitReached("diagnostic jobs", b.lim.Diagnostics)
+	}
+	return nil
+}
+func (b *aiBudget) lifecycleAction() error {
+	if b.lifecycle >= b.lim.LifecycleActions {
+		return limitReached("lifecycle actions", b.lim.LifecycleActions)
+	}
+	return nil
+}
+
+// change checks a proposed file change before it is drafted.
+func (b *aiBudget) change(key string, size int64) error {
+	if b.applies >= b.lim.ApplyAttempts {
+		return limitReached("apply attempts", b.lim.ApplyAttempts)
+	}
+	if !b.files[key] && len(b.files) >= b.lim.ChangedFiles {
+		return limitReached("changed files", b.lim.ChangedFiles)
+	}
+	if b.bytes+size > b.lim.ChangedBytes {
+		return limitReached("changed bytes", b.lim.ChangedBytes)
+	}
+	return nil
+}
+
+// retain clips a tool result to the run's remaining retained-output budget.
+func (b *aiBudget) retain(out string) string {
+	left := b.lim.RetainedOutput - b.output
+	if left < 0 {
+		left = 0
+	}
+	if int64(len(out)) > left {
+		out = clipService(out, int(left)) + "\n[output truncated: the run's retained-output limit is reached; further tool calls will fail]"
+	}
+	b.output += int64(len(out))
+	return out
+}
 
 type AIEvent struct {
 	Sequence int64  `json:"sequence"`
@@ -107,6 +165,11 @@ type AIService struct {
 	Diagnostic DiagnosticRunner
 	Log        *slog.Logger
 	Now        func() time.Time
+	// Limits overrides DefaultAIRunLimits when Rounds is set.
+	Limits AIRunLimits
+	// StreamGrace is how long a finished run's event stream stays available
+	// for late subscribers before it is dropped (default 5 minutes).
+	StreamGrace time.Duration
 
 	mu      sync.Mutex
 	streams map[string]*aiStream
@@ -165,13 +228,53 @@ func (s *AIService) prune(ctx context.Context) {
 	}
 }
 
+func (s *AIService) limits() AIRunLimits {
+	if s.Limits.Rounds > 0 {
+		return s.Limits
+	}
+	return DefaultAIRunLimits()
+}
+
+// openStream registers a run's event stream. Only runs started by this
+// process have one; events for anything else are dropped.
+func (s *AIService) openStream(runID string) {
+	s.init()
+	s.mu.Lock()
+	if s.streams[runID] == nil {
+		s.streams[runID] = &aiStream{subs: map[chan AIEvent]struct{}{}}
+	}
+	s.mu.Unlock()
+}
+
+// retireStream drops a finished run's stream after the grace period and
+// closes its subscribers, so finished runs do not accumulate in memory.
+func (s *AIService) retireStream(runID string) {
+	grace := s.StreamGrace
+	if grace <= 0 {
+		grace = 5 * time.Minute
+	}
+	time.AfterFunc(grace, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		st := s.streams[runID]
+		if st == nil {
+			return
+		}
+		for ch := range st.subs {
+			delete(st.subs, ch)
+			close(ch)
+		}
+		delete(s.streams, runID)
+	})
+}
+
 func (s *AIService) emit(runID, typ string, data any) {
 	s.init()
 	s.mu.Lock()
 	st := s.streams[runID]
 	if st == nil {
-		st = &aiStream{subs: map[chan AIEvent]struct{}{}}
-		s.streams[runID] = st
+		s.mu.Unlock()
+		return
 	}
 	st.next++
 	ev := AIEvent{st.next, typ, s.now(), data}
@@ -193,8 +296,11 @@ func (s *AIService) Subscribe(runID string, after int64) ([]AIEvent, <-chan AIEv
 	defer s.mu.Unlock()
 	st := s.streams[runID]
 	if st == nil {
-		st = &aiStream{subs: map[chan AIEvent]struct{}{}}
-		s.streams[runID] = st
+		// Finished long ago or started before a restart: nothing more will
+		// arrive, so the subscriber gets a closed channel.
+		ch := make(chan AIEvent)
+		close(ch)
+		return nil, ch, func() {}
 	}
 	var old []AIEvent
 	for _, e := range st.events {
@@ -272,8 +378,31 @@ func (s *AIService) Providers(ctx context.Context, actor domain.User) ([]AIProvi
 // AvailableProviders is the non-secret selector surface for authenticated AI
 // users. Provider origins and administrative tuning remain admin-only.
 func (s *AIService) AvailableProviders(ctx context.Context) ([]map[string]any, error) {
-	ps,e:=s.Store.ListAIProviders(ctx);if e!=nil{return nil,e};var out []map[string]any;for _,p:=range ps{if p.Enabled{out=append(out,map[string]any{"id":p.ID,"name":p.Name,"default_model":p.DefaultModel,"default":p.Default,"pricing_configured":p.InputPriceMicros!=nil&&p.OutputPriceMicros!=nil})}};return out,nil
+	ps, e := s.Store.ListAIProviders(ctx)
+	if e != nil {
+		return nil, e
+	}
+	out := []map[string]any{}
+	for _, p := range ps {
+		if p.Enabled {
+			out = append(out, map[string]any{"id": p.ID, "name": p.Name, "default_model": p.DefaultModel, "default": p.Default, "pricing_configured": p.InputPriceMicros != nil && p.OutputPriceMicros != nil})
+		}
+	}
+	return out, nil
 }
+
+// ValidateAIProvider checks a provider profile without saving it (the setup
+// wizard validates before it creates the administrator).
+func ValidateAIProvider(in AIProviderInput) error {
+	if e := validateProvider(in); e != nil {
+		return e
+	}
+	if in.Key == nil || strings.TrimSpace(*in.Key) == "" {
+		return domain.Invalid("API key cannot be empty")
+	}
+	return nil
+}
+
 func validateProvider(in AIProviderInput) error {
 	if strings.TrimSpace(in.Name) == "" || len(in.Name) > 80 {
 		return domain.Invalid("provider name is required")
@@ -284,11 +413,26 @@ func validateProvider(in AIProviderInput) error {
 	if !strings.HasPrefix(in.ChatPath, "/") || !strings.HasPrefix(in.ModelsPath, "/") {
 		return domain.Invalid("provider paths must start with /")
 	}
-	if strings.TrimSpace(in.DefaultModel) == "" {
+	if strings.TrimSpace(in.DefaultModel) == "" || len(in.DefaultModel) > 160 {
 		return domain.Invalid("default model is required")
 	}
-	if in.MaxOutputTokens == 0 {
-		in.MaxOutputTokens = 4096
+	if len(in.ChatPath) > 200 || len(in.ModelsPath) > 200 {
+		return domain.Invalid("provider paths are too long")
+	}
+	if in.ContextSize != nil && (*in.ContextSize < 1024 || *in.ContextSize > 2_000_000) {
+		return domain.Invalid("context size must be between 1,024 and 2,000,000 tokens")
+	}
+	if in.MaxOutputTokens != 0 && (in.MaxOutputTokens < 64 || in.MaxOutputTokens > 131072) {
+		return domain.Invalid("max output tokens must be between 64 and 131,072")
+	}
+	if in.Temperature < 0 || in.Temperature > 2 {
+		return domain.Invalid("temperature must be between 0 and 2")
+	}
+	if in.TimeoutMS != 0 && (in.TimeoutMS < 5000 || in.TimeoutMS > 600000) {
+		return domain.Invalid("timeout must be between 5 and 600 seconds")
+	}
+	if in.InputPriceMicros != nil && *in.InputPriceMicros < 0 || in.OutputPriceMicros != nil && *in.OutputPriceMicros < 0 {
+		return domain.Invalid("prices cannot be negative")
 	}
 	return nil
 }
@@ -690,7 +834,7 @@ func (s *AIService) StartMessage(ctx context.Context, actor domain.User, convers
 	if e = s.Store.InsertAIMessage(ctx, m); e != nil {
 		return domain.AIRun{}, e
 	}
-	lim := DefaultAIRunLimits()
+	lim := s.limits()
 	lj, _ := json.Marshal(lim)
 	run := domain.AIRun{ID: uuid.NewString(), ConversationID: c.ID, UserID: actor.ID, ProviderID: c.ProviderID, Model: *c.Model, Mode: mode, Status: "queued", LimitsJSON: string(lj), PlanJSON: "[]", CreatedAtMS: now}
 	if e = s.Store.InsertAIRun(ctx, run); e != nil {
@@ -698,52 +842,72 @@ func (s *AIService) StartMessage(ctx context.Context, actor domain.User, convers
 	}
 	c.UpdatedAtMS = now
 	_ = s.Store.UpdateAIConversation(ctx, c)
+	s.openStream(run.ID)
 	base := context.WithoutCancel(ctx)
 	rctx, cancel := context.WithTimeout(base, time.Duration(lim.WallMinutes)*time.Minute)
 	s.init()
 	s.mu.Lock()
 	s.cancels[run.ID] = cancel
 	s.mu.Unlock()
+	// The goroutine owns its own copy; the caller gets the queued snapshot.
+	live := run
 	go func() {
 		defer cancel()
 		if mode == AIAuto {
-			if !s.awaitAutoEnvelope(rctx, &run) {
+			if !s.awaitAutoEnvelope(rctx, &live, lim) {
 				return
 			}
 		}
-		s.run(rctx, actor, c, &run, lim)
+		s.run(rctx, actor, c, &live, lim)
 	}()
 	return run, nil
 }
 
-func (s *AIService) awaitAutoEnvelope(ctx context.Context, run *domain.AIRun) bool {
-	call := domain.AIToolCall{ID: uuid.NewString(), RunID: run.ID, CallIndex: -1, Name: "auto_repair_envelope", ArgumentsJSON: `{"actions":["diagnostics","files","startup","lifecycle","deploy","site_publish"],"limits":"server defaults"}`, ApprovalState: "pending", Status: "proposed", CreatedAtMS: s.now()}
+// autoActions are the live actions one Auto approval covers. Secure
+// environment input always waits for the user; GitHub writes, kill, startup
+// changes, deployments and site publication are not operator tools.
+var autoActions = []string{"run_diagnostic", "propose_file_change", "restart_bot"}
+
+func (s *AIService) awaitAutoEnvelope(ctx context.Context, run *domain.AIRun, lim AIRunLimits) bool {
+	args, _ := json.Marshal(map[string]any{"actions": autoActions, "limits": lim})
+	call := domain.AIToolCall{ID: uuid.NewString(), RunID: run.ID, CallIndex: -1, Name: "auto_repair_envelope", ArgumentsJSON: string(args), ApprovalState: "pending", Status: "proposed", CreatedAtMS: s.now()}
+	wait := s.expectDecision(call.ID, run.ID)
 	_ = s.Store.InsertAIToolCall(ctx, call)
 	run.Status = "waiting_approval"
 	_ = s.Store.UpdateAIRun(ctx, *run)
-	s.emit(run.ID, "approval_required", map[string]any{"tool_call": call, "title": "Approve bounded Auto repair"})
-	ok := s.waitDecision(ctx, call.ID, run.ID)
+	s.emit(run.ID, "approval_required", map[string]any{"tool_call": toolCallView(call), "title": "Approve bounded Auto repair", "detail": map[string]any{"actions": autoActions, "limits": lim}})
+	ok := wait(ctx)
+	call.FinishedAtMS = ptrNow(s.now())
 	if !ok {
+		call.ApprovalState, call.Status = "rejected", "cancelled"
+		_ = s.Store.UpdateAIToolCall(context.WithoutCancel(ctx), call)
 		s.finishRun(run, "cancelled", "rejected", "Auto repair was not approved.")
 		return false
 	}
+	call.ApprovalState, call.Status = "approved", "completed"
+	_ = s.Store.UpdateAIToolCall(ctx, call)
 	now := s.now()
 	run.AutoApprovedAtMS = &now
 	run.Status = "queued"
 	_ = s.Store.UpdateAIRun(ctx, *run)
 	return true
 }
-func (s *AIService) waitDecision(ctx context.Context, callID, runID string) bool {
+
+// expectDecision registers a waiter before the pending state is persisted,
+// so a decision that arrives immediately is never lost.
+func (s *AIService) expectDecision(callID, runID string) func(context.Context) bool {
 	ch := make(chan bool, 1)
 	s.mu.Lock()
 	s.pending[callID] = pendingApproval{runID, ch}
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); delete(s.pending, callID); s.mu.Unlock() }()
-	select {
-	case v := <-ch:
-		return v
-	case <-ctx.Done():
-		return false
+	return func(ctx context.Context) bool {
+		defer func() { s.mu.Lock(); delete(s.pending, callID); s.mu.Unlock() }()
+		select {
+		case v := <-ch:
+			return v
+		case <-ctx.Done():
+			return false
+		}
 	}
 }
 
@@ -769,6 +933,12 @@ func (s *AIService) Decision(ctx context.Context, actor domain.User, callID stri
 	if call.ApprovalState != "pending" {
 		return fmt.Errorf("%w: this decision was already made", domain.ErrConflict)
 	}
+	s.mu.Lock()
+	p, ok := s.pending[callID]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: this run is no longer waiting for a decision", domain.ErrConflict)
+	}
 	if approve {
 		call.ApprovalState = "approved"
 	} else {
@@ -776,14 +946,9 @@ func (s *AIService) Decision(ctx context.Context, actor domain.User, callID stri
 		call.Status = "cancelled"
 	}
 	_ = s.Store.UpdateAIToolCall(ctx, call)
-	s.mu.Lock()
-	p, ok := s.pending[callID]
-	s.mu.Unlock()
-	if ok {
-		select {
-		case p.ch <- approve:
-		default:
-		}
+	select {
+	case p.ch <- approve:
+	default:
 	}
 	s.emit(run.ID, "status", map[string]any{"approval": call.ApprovalState, "tool_call_id": callID})
 	return nil
@@ -810,11 +975,15 @@ func (s *AIService) Cancel(ctx context.Context, actor domain.User, runID string)
 	if cancel != nil {
 		cancel()
 	}
+	if r.Status == "completed" || r.Status == "failed" || r.Status == "cancelled" || r.Status == "interrupted" {
+		return nil
+	}
 	r.Status = "cancelled"
 	now := s.now()
 	r.FinishedAtMS = &now
 	_ = s.Store.UpdateAIRun(ctx, r)
-	s.emit(runID, "cancelled", nil)
+	s.emit(runID, "cancelled", map[string]any{"status": "cancelled"})
+	s.retireStream(runID)
 	return nil
 }
 func (s *AIService) Run(ctx context.Context, actor domain.User, id string) (domain.AIRun, error) {
@@ -880,6 +1049,7 @@ func (s *AIService) run(ctx context.Context, actor domain.User, conv domain.AICo
 		}
 	}
 	repeat := map[string]int{}
+	budget := newAIBudget(lim)
 	mutated := false
 	callIndex := int64(0)
 	for round := 0; round < lim.Rounds; round++ {
@@ -939,17 +1109,26 @@ func (s *AIService) run(ctx context.Context, actor domain.User, conv domain.AICo
 				s.finishRun(run, "failed", "tool_loop", "The provider kept repeating the same tool call.")
 				return
 			}
-			call := domain.AIToolCall{ID: tc.ID, RunID: run.ID, CallIndex: callIndex, Name: tc.Function.Name, ArgumentsJSON: sanitizeArgs(tc.Function.Arguments), ApprovalState: "not_required", Status: "running", CreatedAtMS: s.now()}
+			// Providers reuse short call ids across runs, so rows get their
+			// own UUID and the provider id is only echoed in the tool message.
+			call := domain.AIToolCall{ID: uuid.NewString(), RunID: run.ID, CallIndex: callIndex, Name: tc.Function.Name, ArgumentsJSON: sanitizeArgs(tc.Function.Arguments), ApprovalState: "not_required", Status: "running", CreatedAtMS: s.now()}
 			callIndex++
-			if call.ID == "" {
-				call.ID = uuid.NewString()
+			if tc.ID != "" && len(tc.ID) <= 200 {
+				pid := tc.ID
+				call.ProviderCallID = &pid
 			}
 			if e = s.Store.InsertAIToolCall(ctx, call); e != nil {
 				s.finishRun(run, "failed", "storage", "Could not record the tool call.")
 				return
 			}
-			s.emit(run.ID, "tool_proposed", call)
-			out, didMutate, e := s.executeTool(ctx, actor, conv, run, &call, lim)
+			s.emit(run.ID, "tool_proposed", toolCallView(call))
+			var out string
+			var didMutate bool
+			if budget.output >= lim.RetainedOutput {
+				e = limitReached("bytes of retained tool output", lim.RetainedOutput)
+			} else {
+				out, didMutate, e = s.executeTool(ctx, actor, conv, run, &call, budget)
+			}
 			mutated = mutated || didMutate
 			finished := s.now()
 			call.FinishedAtMS = &finished
@@ -961,14 +1140,22 @@ func (s *AIService) run(ctx context.Context, actor domain.User, conv domain.AICo
 			} else {
 				call.Status = "completed"
 			}
-			call.Output = clipService(out, 1<<20)
-			_ = s.Store.UpdateAIToolCall(ctx, call)
+			if e != nil {
+				// Errors are short and must reach the model intact.
+				budget.output += int64(len(out))
+				call.Output = out
+			} else {
+				call.Output = budget.retain(clipService(out, 1<<20))
+			}
+			_ = s.Store.UpdateAIToolCall(context.WithoutCancel(ctx), call)
 			s.emit(run.ID, "tool_output", map[string]any{"id": call.ID, "name": call.Name, "output": call.Output, "status": call.Status, "duration_ms": call.DurationMS, "exit_code": call.ExitCode})
 			chat = append(chat, operator.Message{Role: "tool", ToolCallID: tc.ID, Content: clipService(call.Output, 24000)})
 		}
 	}
 	s.finishRun(run, "failed", "round_limit", "The run reached its tool/provider round limit.")
 }
+
+func ptrNow(v int64) *int64 { return &v }
 
 func estimatedCost(p domain.AIProviderProfile, in, out int64) *int64 {
 	if p.InputPriceMicros == nil || p.OutputPriceMicros == nil {
@@ -1021,6 +1208,7 @@ func (s *AIService) finishRun(r *domain.AIRun, status, code, msg string) {
 	s.mu.Lock()
 	delete(s.cancels, r.ID)
 	s.mu.Unlock()
+	s.retireStream(r.ID)
 }
 func (s *AIService) reauthorize(ctx context.Context, actor domain.User, c domain.AIConversation, mutate bool) error {
 	fresh, e := s.Store.GetUserByID(ctx, actor.ID)
@@ -1084,7 +1272,7 @@ func (s *AIService) redactor(ctx context.Context, c domain.AIConversation) *oper
 	return r
 }
 
-func (s *AIService) executeTool(ctx context.Context, actor domain.User, c domain.AIConversation, run *domain.AIRun, call *domain.AIToolCall, lim AIRunLimits) (string, bool, error) {
+func (s *AIService) executeTool(ctx context.Context, actor domain.User, c domain.AIConversation, run *domain.AIRun, call *domain.AIToolCall, budget *aiBudget) (string, bool, error) {
 	var a map[string]json.RawMessage
 	if e := json.Unmarshal([]byte(call.ArgumentsJSON), &a); e != nil {
 		return "", false, domain.Invalid("tool arguments are invalid")
@@ -1192,11 +1380,13 @@ func (s *AIService) executeTool(ctx context.Context, actor domain.User, c domain
 			return "", false, domain.Invalid("environment names are invalid")
 		}
 		call.ApprovalState, call.Status = "pending", "proposed"
+		wait := s.expectDecision(call.ID, run.ID)
 		_ = s.Store.UpdateAIToolCall(ctx, *call)
 		run.Status = "waiting_approval"
 		_ = s.Store.UpdateAIRun(ctx, *run)
-		s.emit(run.ID, "approval_required", map[string]any{"tool_call": call, "title": "Secure environment input", "names": names, "secure_input": true})
-		ok := s.waitDecision(ctx, call.ID, run.ID)
+		s.emit(run.ID, "approval_required", map[string]any{"tool_call": toolCallView(*call), "title": "Secure environment input", "names": names, "secure_input": true})
+		ok := wait(ctx)
+		call.ApprovalState = map[bool]string{true: "approved", false: "rejected"}[ok]
 		run.Status = "running"
 		_ = s.Store.UpdateAIRun(ctx, *run)
 		if !ok {
@@ -1233,7 +1423,7 @@ func (s *AIService) executeTool(ctx context.Context, actor domain.User, c domain
 		s.emit(run.ID, "citation", map[string]any{"title": title, "url": str("url"), "retrieved_at_ms": s.now()})
 		return red.Text(title + "\n\n" + text), false, nil
 	case "propose_file_change":
-		return s.fileChange(ctx, actor, c, run, call, str("scope"), str("path"), str("content"), str("summary"), a["delete"])
+		return s.fileChange(ctx, actor, c, run, call, budget, str("scope"), str("path"), str("content"), str("summary"), a["delete"])
 	case "run_diagnostic":
 		if s.Diagnostic == nil {
 			return "", false, domain.Invalid("diagnostic runner is unavailable")
@@ -1241,35 +1431,53 @@ func (s *AIService) executeTool(ctx context.Context, actor domain.User, c domain
 		if c.BotID == nil {
 			return "", false, domain.Invalid("standalone sites do not have a runtime diagnostic image")
 		}
-		b, e := s.Bots.Authorize(ctx, actor, *c.BotID, domain.PermEditFiles)
-		if e != nil {
+		var argv []string
+		if json.Unmarshal(a["argv"], &argv) != nil || len(argv) == 0 {
+			return "", false, domain.Invalid("argv is invalid")
+		}
+		label := red.Text(clipService(strings.Join(argv, " "), 200))
+		if _, e := s.Bots.Authorize(ctx, actor, *c.BotID, domain.PermEditFiles); e != nil {
+			s.audit(ctx, actor, run, "bot", *c.BotID, "ai.diagnostic", label, "denied")
 			return "", false, e
 		}
-		var argv []string
-		if json.Unmarshal(a["argv"], &argv) != nil {
-			return "", false, domain.Invalid("argv is invalid")
+		if e := budget.diagnostic(); e != nil {
+			return "", false, e
 		}
 		if run.Mode == AIApproval && !s.awaitMutation(ctx, run, call, "Run isolated diagnostic", argv) {
 			return "Rejected by user.", false, nil
 		}
+		// Access may have changed while the approval card was open.
+		b, e := s.Bots.Authorize(ctx, actor, *c.BotID, domain.PermEditFiles)
+		if e != nil {
+			s.audit(ctx, actor, run, "bot", *c.BotID, "ai.diagnostic", label, "denied")
+			return "", false, e
+		}
+		budget.diagnostics++
 		start := time.Now()
 		res, e := s.Diagnostic.RunDiagnostic(ctx, *c.BotID, b.Runtime, argv)
 		dur := time.Since(start)
 		ms := dur.Milliseconds()
 		call.DurationMS = &ms
 		call.ExitCode = &res.ExitCode
+		s.audit(ctx, actor, run, "bot", *c.BotID, "ai.diagnostic", label, outcomeOf(e))
 		return red.Text(clipService(res.Output, 1<<20)), false, e
 	case "restart_bot":
 		if c.BotID == nil {
 			return "", false, domain.Invalid("a site cannot be restarted")
 		}
 		if _, e := s.Bots.Authorize(ctx, actor, *c.BotID, domain.PermPower); e != nil {
+			s.audit(ctx, actor, run, "bot", *c.BotID, "ai.restart", "", "denied")
+			return "", false, e
+		}
+		if e := budget.lifecycleAction(); e != nil {
 			return "", false, e
 		}
 		if run.Mode == AIApproval && !s.awaitMutation(ctx, run, call, "Restart bot", nil) {
 			return "Rejected by user.", false, nil
 		}
+		budget.lifecycle++
 		b, e := s.Bots.Restart(ctx, actor, *c.BotID)
+		s.audit(ctx, actor, run, "bot", *c.BotID, "ai.restart", "", outcomeOf(e))
 		if e != nil {
 			return "", false, e
 		}
@@ -1324,9 +1532,12 @@ func (s *AIService) SecureInput(ctx context.Context, actor domain.User, callID s
 			return domain.Invalid("a value was supplied for an unrequested name")
 		}
 	}
+	names := strings.Join(sortedKeys(values), ", ")
 	if e = s.Bots.SetEnv(ctx, actor, *c.BotID, values); e != nil {
+		s.audit(ctx, actor, &run, "bot", *c.BotID, "ai.env_input", names, outcomeOf(e))
 		return e
 	}
+	s.audit(ctx, actor, &run, "bot", *c.BotID, "ai.env_input", names, "ok")
 	call.ApprovalState = "approved"
 	_ = s.Store.UpdateAIToolCall(ctx, call)
 	s.mu.Lock()
@@ -1354,11 +1565,14 @@ func sortedKeys(v map[string]string) []string {
 func (s *AIService) awaitMutation(ctx context.Context, run *domain.AIRun, call *domain.AIToolCall, title string, detail any) bool {
 	call.ApprovalState = "pending"
 	call.Status = "proposed"
+	wait := s.expectDecision(call.ID, run.ID)
 	_ = s.Store.UpdateAIToolCall(ctx, *call)
 	run.Status = "waiting_approval"
 	_ = s.Store.UpdateAIRun(ctx, *run)
-	s.emit(run.ID, "approval_required", map[string]any{"tool_call": call, "title": title, "detail": detail})
-	ok := s.waitDecision(ctx, call.ID, run.ID)
+	s.emit(run.ID, "approval_required", map[string]any{"tool_call": toolCallView(*call), "title": title, "detail": detail})
+	ok := wait(ctx)
+	// Keep the in-memory row in step with Decision, which already stored it.
+	call.ApprovalState = map[bool]string{true: "approved", false: "rejected"}[ok]
 	run.Status = "running"
 	_ = s.Store.UpdateAIRun(ctx, *run)
 	call.Status = "running"
@@ -1453,7 +1667,7 @@ func simpleDiff(p string, before, after []byte) string {
 	return clipService(out.String(), 2<<20)
 }
 
-func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.AIConversation, run *domain.AIRun, call *domain.AIToolCall, scope, p, content, summary string, deleteRaw json.RawMessage) (string, bool, error) {
+func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.AIConversation, run *domain.AIRun, call *domain.AIToolCall, budget *aiBudget, scope, p, content, summary string, deleteRaw json.RawMessage) (string, bool, error) {
 	if operator.ProtectedPath(p) {
 		return "", false, domain.ErrForbidden
 	}
@@ -1491,6 +1705,14 @@ func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.
 			return "", false, domain.Invalid("proposed content contains a configured secret value")
 		}
 	}
+	size := int64(len(after))
+	if del {
+		size = int64(len(before))
+	}
+	fileKey := kind + ":" + target + ":" + path.Clean(p)
+	if e := budget.change(fileKey, size); e != nil {
+		return "", false, e
+	}
 	bg, _ := gzipText(before)
 	ag, _ := gzipText(after)
 	op := "modify"
@@ -1512,6 +1734,12 @@ func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.
 	if run.Mode == AIApproval && !s.awaitMutation(ctx, run, call, "Apply reviewed file change", publicChange(change)) {
 		return "Change was drafted but not applied.", false, nil
 	}
+	// Access may have changed while the approval card was open.
+	if e := s.authorizeChangeTarget(ctx, actor, kind, target); e != nil {
+		s.audit(ctx, actor, run, kind, target, "ai.file_apply", p, "denied")
+		return "", false, e
+	}
+	budget.applies++
 	pf := filesystem.PatchFile{Path: p, BeforeRevision: rev, After: after, Mode: 0o640}
 	if del {
 		pf.After = nil
@@ -1519,7 +1747,9 @@ func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.
 	commit, e := w.ApplyPatch([]filesystem.PatchFile{pf}, maxAIFile, maxAIChange)
 	if e != nil {
 		change.Status = "conflicted"
-		_ = s.Store.UpdateAIChangeSet(ctx, change)
+		_ = s.Store.UpdateAIChangeSet(context.WithoutCancel(ctx), change)
+		s.emit(run.ID, "change_set", publicChange(change))
+		s.audit(ctx, actor, run, kind, target, "ai.file_apply", p, "failed")
 		return "", false, e
 	}
 	change.Status = "applied"
@@ -1538,9 +1768,123 @@ func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.
 		return "", false, e
 	}
 	if e = commit.Finish(); e != nil {
+		s.audit(ctx, actor, run, kind, target, "ai.file_apply", p, "failed")
 		return "", false, e
 	}
+	budget.files[fileKey] = true
+	budget.bytes += size
+	s.audit(ctx, actor, run, kind, target, "ai.file_apply", p, "ok")
+	s.emit(run.ID, "change_set", publicChange(change))
 	return "Applied change set " + change.ID + ". Undo remains available while file revisions still match.", true, nil
+}
+
+func (s *AIService) authorizeChangeTarget(ctx context.Context, actor domain.User, kind, target string) error {
+	fresh, e := s.Store.GetUserByID(ctx, actor.ID)
+	if e != nil || fresh.Disabled {
+		return domain.ErrForbidden
+	}
+	if kind == "bot" {
+		_, e = s.Bots.Authorize(ctx, fresh, target, domain.PermEditFiles)
+		return e
+	}
+	_, _, e = s.Sites.Authorize(ctx, fresh, target, domain.WorkspaceDeveloper)
+	return e
+}
+
+func outcomeOf(e error) string {
+	switch {
+	case e == nil:
+		return "ok"
+	case errors.Is(e, domain.ErrForbidden), errors.Is(e, domain.ErrNotFound):
+		return "denied"
+	default:
+		return "failed"
+	}
+}
+
+// audit records a live action the model took for actor, in either mode. The
+// target is a path, argv summary or variable names, never content or values.
+func (s *AIService) audit(ctx context.Context, actor domain.User, run *domain.AIRun, kind, targetID, action, target, outcome string) {
+	if s.Audit == nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	label := actor.Email + " via AI operator"
+	if run != nil && run.Mode == AIAuto {
+		label += " (Auto)"
+	}
+	ev := domain.AuditEvent{Action: action, Outcome: outcome, ActorID: &actor.ID, ActorLabel: &label}
+	if target != "" {
+		t := clipService(target, 300)
+		ev.Target = &t
+	}
+	id := targetID
+	if kind == "bot" {
+		ev.BotID = &id
+		if s.Bots != nil {
+			if b, e := s.Bots.Store.GetBot(ctx, id); e == nil {
+				ev.BotName = &b.Name
+			}
+		}
+	} else {
+		ev.SiteID = &id
+		if s.Sites != nil {
+			if st, e := s.Sites.Store.GetSite(ctx, id); e == nil {
+				ev.SiteName = &st.Name
+			}
+		}
+	}
+	s.Audit.Record(ctx, ev)
+}
+
+func toolCallView(c domain.AIToolCall) map[string]any {
+	return map[string]any{"id": c.ID, "run_id": c.RunID, "call_index": c.CallIndex, "name": c.Name, "arguments_json": c.ArgumentsJSON, "output": c.Output, "approval_state": c.ApprovalState, "status": c.Status, "exit_code": c.ExitCode, "duration_ms": c.DurationMS, "error_message": c.ErrorMessage, "created_at_ms": c.CreatedAtMS, "finished_at_ms": c.FinishedAtMS}
+}
+
+// AIRunDetail is a run with its tool calls and change sets, for restoring
+// the run inspector after a reload.
+type AIRunDetail struct {
+	Run        domain.AIRun
+	ToolCalls  []map[string]any
+	ChangeSets []map[string]any
+}
+
+// ConversationRuns returns the latest runs of a conversation, newest first.
+func (s *AIService) ConversationRuns(ctx context.Context, actor domain.User, conversationID string, limit int) ([]AIRunDetail, error) {
+	c, e := s.Store.GetAIConversation(ctx, conversationID)
+	if e != nil {
+		return nil, e
+	}
+	if e = s.authorizeTarget(ctx, actor, c, false); e != nil {
+		return nil, e
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	runs, e := s.Store.ListAIRuns(ctx, c.ID, limit)
+	if e != nil {
+		return nil, e
+	}
+	out := make([]AIRunDetail, 0, len(runs))
+	for _, r := range runs {
+		calls, e := s.Store.ListAIToolCalls(ctx, r.ID)
+		if e != nil {
+			return nil, e
+		}
+		changes, e := s.Store.ListAIChangeSets(ctx, r.ID)
+		if e != nil {
+			return nil, e
+		}
+		d := AIRunDetail{Run: r, ToolCalls: make([]map[string]any, len(calls)), ChangeSets: make([]map[string]any, len(changes))}
+		for i, x := range calls {
+			d.ToolCalls[i] = toolCallView(x)
+		}
+		for i, x := range changes {
+			d.ChangeSets[i] = publicChange(x)
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 func publicChange(c domain.AIChangeSet) map[string]any {
@@ -1548,7 +1892,7 @@ func publicChange(c domain.AIChangeSet) map[string]any {
 	for _, f := range c.Files {
 		files = append(files, map[string]any{"path": f.Path, "operation": f.Operation, "diff": f.Diff, "before_revision": f.BeforeRevision, "after_revision": f.AfterRevision})
 	}
-	return map[string]any{"id": c.ID, "status": c.Status, "summary": c.Summary, "target_kind": c.TargetKind, "target_id": c.TargetID, "files": files}
+	return map[string]any{"id": c.ID, "run_id": c.RunID, "status": c.Status, "summary": c.Summary, "target_kind": c.TargetKind, "target_id": c.TargetID, "created_at_ms": c.CreatedAtMS, "applied_at_ms": c.AppliedAtMS, "reverted_at_ms": c.RevertedAtMS, "files": files}
 }
 func (s *AIService) ChangeSet(ctx context.Context, actor domain.User, id string) (domain.AIChangeSet, error) {
 	c, e := s.Store.GetAIChangeSet(ctx, id)

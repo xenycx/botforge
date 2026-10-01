@@ -177,8 +177,10 @@ func scanAIRun(row interface{ Scan(...any) error }) (domain.AIRun, error) {
 	return r, mapErr(e)
 }
 
+const aiRunCols = `id,conversation_id,user_id,provider_id,model,mode,status,limits_json,plan_json,auto_approved_at_ms,input_tokens,output_tokens,error_code,error_message,created_at_ms,started_at_ms,finished_at_ms`
+
 func (db *DB) GetAIRun(ctx context.Context, id string) (domain.AIRun, error) {
-	return scanAIRun(db.QueryRowContext(ctx, `SELECT id,conversation_id,user_id,provider_id,model,mode,status,limits_json,plan_json,auto_approved_at_ms,input_tokens,output_tokens,error_code,error_message,created_at_ms,started_at_ms,finished_at_ms FROM ai_runs WHERE id=?`, id))
+	return scanAIRun(db.QueryRowContext(ctx, `SELECT `+aiRunCols+` FROM ai_runs WHERE id=?`, id))
 }
 
 func (db *DB) UpdateAIRun(ctx context.Context, r domain.AIRun) error {
@@ -203,14 +205,90 @@ func (db *DB) PruneAIConversations(ctx context.Context, beforeMS int64, batch in
 }
 
 func (db *DB) InsertAIToolCall(ctx context.Context, c domain.AIToolCall) error {
-	_, e := db.ExecContext(ctx, `INSERT INTO ai_tool_calls(id,run_id,call_index,name,arguments_json,output,approval_state,status,exit_code,duration_ms,error_message,created_at_ms,finished_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.ID, c.RunID, c.CallIndex, c.Name, c.ArgumentsJSON, c.Output, c.ApprovalState, c.Status, c.ExitCode, c.DurationMS, c.ErrorMessage, c.CreatedAtMS, c.FinishedAtMS)
+	_, e := db.ExecContext(ctx, `INSERT INTO ai_tool_calls(id,run_id,call_index,name,arguments_json,output,approval_state,status,exit_code,duration_ms,error_message,created_at_ms,finished_at_ms,provider_call_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.ID, c.RunID, c.CallIndex, c.Name, c.ArgumentsJSON, c.Output, c.ApprovalState, c.Status, c.ExitCode, c.DurationMS, c.ErrorMessage, c.CreatedAtMS, c.FinishedAtMS, c.ProviderCallID)
 	return mapErr(e)
 }
 
-func (db *DB) GetAIToolCall(ctx context.Context, id string) (domain.AIToolCall, error) {
+const aiToolCallCols = `id,run_id,call_index,name,arguments_json,output,approval_state,status,exit_code,duration_ms,error_message,created_at_ms,finished_at_ms,provider_call_id`
+
+func scanAIToolCall(row interface{ Scan(...any) error }) (domain.AIToolCall, error) {
 	var c domain.AIToolCall
-	e := db.QueryRowContext(ctx, `SELECT id,run_id,call_index,name,arguments_json,output,approval_state,status,exit_code,duration_ms,error_message,created_at_ms,finished_at_ms FROM ai_tool_calls WHERE id=?`, id).Scan(&c.ID, &c.RunID, &c.CallIndex, &c.Name, &c.ArgumentsJSON, &c.Output, &c.ApprovalState, &c.Status, &c.ExitCode, &c.DurationMS, &c.ErrorMessage, &c.CreatedAtMS, &c.FinishedAtMS)
+	e := row.Scan(&c.ID, &c.RunID, &c.CallIndex, &c.Name, &c.ArgumentsJSON, &c.Output, &c.ApprovalState, &c.Status, &c.ExitCode, &c.DurationMS, &c.ErrorMessage, &c.CreatedAtMS, &c.FinishedAtMS, &c.ProviderCallID)
 	return c, mapErr(e)
+}
+
+func (db *DB) GetAIToolCall(ctx context.Context, id string) (domain.AIToolCall, error) {
+	return scanAIToolCall(db.QueryRowContext(ctx, `SELECT `+aiToolCallCols+` FROM ai_tool_calls WHERE id=?`, id))
+}
+
+// ListAIRuns returns a conversation's latest runs, newest first.
+func (db *DB) ListAIRuns(ctx context.Context, conversationID string, limit int) ([]domain.AIRun, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	rows, e := db.QueryContext(ctx, `SELECT `+aiRunCols+` FROM ai_runs WHERE conversation_id=? ORDER BY created_at_ms DESC, rowid DESC LIMIT ?`, conversationID, limit)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	var out []domain.AIRun
+	for rows.Next() {
+		r, e := scanAIRun(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListAIToolCalls returns a run's tool calls in the order they were made
+// (the Auto envelope, index -1, first).
+func (db *DB) ListAIToolCalls(ctx context.Context, runID string) ([]domain.AIToolCall, error) {
+	rows, e := db.QueryContext(ctx, `SELECT `+aiToolCallCols+` FROM ai_tool_calls WHERE run_id=? ORDER BY call_index, created_at_ms LIMIT 500`, runID)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	var out []domain.AIToolCall
+	for rows.Next() {
+		c, e := scanAIToolCall(rows)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListAIChangeSets returns a run's change sets with their files, oldest first.
+func (db *DB) ListAIChangeSets(ctx context.Context, runID string) ([]domain.AIChangeSet, error) {
+	rows, e := db.QueryContext(ctx, `SELECT id FROM ai_change_sets WHERE run_id=? ORDER BY created_at_ms, rowid LIMIT 200`, runID)
+	if e != nil {
+		return nil, e
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return nil, e
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	out := make([]domain.AIChangeSet, 0, len(ids))
+	for _, id := range ids {
+		c, e := db.GetAIChangeSet(ctx, id)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 func (db *DB) UpdateAIToolCall(ctx context.Context, c domain.AIToolCall) error {

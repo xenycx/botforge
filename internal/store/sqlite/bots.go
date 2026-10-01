@@ -118,7 +118,9 @@ func (db *DB) ListBots(ctx context.Context, ownerID string) ([]domain.Bot, error
 		q += ` WHERE owner_id = ?`
 		args = append(args, ownerID)
 	}
-	rows, err := db.QueryContext(ctx, q+` ORDER BY created_at_ms LIMIT 1000`, args...)
+	// Bots created in the same millisecond still list in a stable order.
+	// Bots created in the same millisecond still list in a stable order.
+	rows, err := db.QueryContext(ctx, q+` ORDER BY created_at_ms, lower(name), id LIMIT 1000`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ const visibleBotsSQL = `SELECT id FROM bots WHERE owner_id = ?1
 // that are in one of their workspaces.
 func (db *DB) ListBotsForUser(ctx context.Context, userID string) ([]domain.Bot, error) {
 	rows, err := db.QueryContext(ctx, `SELECT `+botCols+` FROM bots WHERE id IN (`+visibleBotsSQL+`)
-		ORDER BY created_at_ms LIMIT 1000`, userID)
+		ORDER BY created_at_ms, lower(name), id LIMIT 1000`, userID)
 	if err != nil {
 		return nil, err
 	}

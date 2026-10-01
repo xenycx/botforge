@@ -13,6 +13,19 @@ authoritative current version.
   Risa/SearxNG research, private retained chats, streamed tool activity,
   Approval and bounded Auto repair modes, secure environment input, atomic
   revision-checked file changes with undo, and isolated offline diagnostics.
+- The first AI provider and its API key can be configured in a new optional
+  **AI operator** step of the `/setup` wizard.
+- Administration → Panel settings can now edit, enable/disable, delete and
+  re-key AI providers with every field (chat/models paths, context size, max
+  output tokens, temperature, timeout, prices), discover models from the
+  provider, and test the saved web-search settings.
+- `GET /api/v1/ai/conversations/:id/runs` returns a conversation's latest runs
+  with their tool calls and change sets. The AI workspace uses it to restore
+  the active run, pending approvals, secure-input cards, change sets and Undo
+  after a reload and after a run finishes.
+- Model-initiated AI file applies, diagnostics, restarts and secure
+  environment input are recorded in the activity log (`ai.file_apply`,
+  `ai.diagnostic`, `ai.restart`, `ai.env_input`), in Auto mode too.
 
 - Bot Sites: every Discord bot can now create one integrated public page from
   its **Public page** tab. Page Studio controls the headline, introduction,
@@ -57,6 +70,17 @@ authoritative current version.
 
 ### Changed
 
+- AI run limits (diagnostics, apply attempts, lifecycle actions, changed
+  files and bytes, retained tool output) are now enforced per run in both
+  Approval and Auto mode; a call over a limit returns a tool error to the
+  model. The Auto envelope lists the covered tools and the actual limits.
+- The AI operator documentation, `/docs` page and Auto envelope no longer
+  claim startup, deployment or site-publish actions; the operator has no such
+  tools.
+- AI tool-call rows use panel UUIDs; the provider's call id is kept in the new
+  `provider_call_id` column (migration `0029_ai_tool_call_ids.sql`).
+- The configured search base URL may include a path prefix
+  (`<base>/search`).
 - Renamed the bot Analytics tab to **Public page** and made Page Studio its
   default surface. Private telemetry, command activity, events and SDK setup
   remain available under **Private insights** in that tab.
@@ -96,6 +120,16 @@ authoritative current version.
 
 ### Fixed
 
+- AI runs no longer fail with a storage error when a provider reuses a tool
+  call id (such as `call_0`) across runs.
+- An approval decided right after its card appeared could be lost, leaving
+  the run waiting; decided approvals are no longer written back as pending
+  when the run finishes. Deciding a call whose run is no longer waiting now
+  returns a conflict.
+- Finished AI run event streams are dropped from memory after five minutes.
+- A data race between starting an AI run and returning it.
+- Bot lists order bots created in the same millisecond deterministically
+  (by name, then id), which also fixes a flaky test.
 - A failed AI run now ends its live stream with an error event, so the
   workspace no longer shows the run as still working.
 - AI provider error codes (for example rate-limit or authentication codes)
@@ -113,6 +147,12 @@ authoritative current version.
 
 ### Security
 
+- AI web research validates the address of every connection at dial time,
+  covering DNS rebinding and redirects, and now also blocks carrier-grade NAT
+  (`100.64.0.0/10`), reserved, NAT64 and 6to4 ranges. Research connections no
+  longer go through an environment proxy. The administrator-configured search
+  origin may be private (self-hosted SearxNG); page fetches stay public-only
+  and search requests never follow a redirect to another origin.
 - AI tools reauthorize every action, redact configured secret values, exclude
   credential paths, reject SSRF and shell execution, and run diagnostics in
   restricted Docker containers mounting only a private safe snapshot. The

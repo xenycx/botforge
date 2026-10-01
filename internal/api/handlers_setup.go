@@ -1,10 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 
+	"botpanel/internal/domain"
 	"botpanel/internal/service"
 )
 
@@ -57,9 +59,30 @@ func (s *server) setupComplete(c fiber.Ctx) error {
 		Email    string       `json:"email"`
 		Password string       `json:"password"`
 		Settings settingsBody `json:"settings"`
+		// Optional first AI operator provider; its key is sealed like any
+		// provider key and never returned.
+		AIProvider *service.AIProviderInput `json:"ai_provider"`
 	}
 	if err := decode(c, &in); err != nil {
 		return err
+	}
+	if in.AIProvider != nil {
+		if s.ai == nil {
+			return domain.Invalid("the AI operator is not available on this panel")
+		}
+		in.AIProvider.Enabled, in.AIProvider.Default = true, true
+		if in.AIProvider.ChatPath == "" {
+			in.AIProvider.ChatPath = "/chat/completions"
+		}
+		if in.AIProvider.ModelsPath == "" {
+			in.AIProvider.ModelsPath = "/models"
+		}
+		if in.AIProvider.Temperature == 0 {
+			in.AIProvider.Temperature = 0.2
+		}
+		if err := service.ValidateAIProvider(*in.AIProvider); err != nil {
+			return err
+		}
 	}
 	sess, err := s.settings.CompleteSetup(c.Context(), service.SetupInput{Code: in.Code, Email: in.Email, Password: in.Password,
 		Settings: in.Settings.input()}, deviceLabel(c.Get(fiber.HeaderUserAgent)))
@@ -73,6 +96,15 @@ func (s *server) setupComplete(c fiber.Ctx) error {
 		return err
 	}
 	out := fiber.Map{"user": toUser(sess.User), "csrf_token": sess.CSRF}
+	if in.AIProvider != nil {
+		if _, aerr := s.ai.PutProvider(c.Context(), sess.User, "", *in.AIProvider); aerr != nil {
+			if err == nil {
+				err = fmt.Errorf("AI provider not saved: %w", aerr)
+			} else {
+				err = fmt.Errorf("%w; AI provider not saved: %v", err, aerr)
+			}
+		}
+	}
 	if err != nil {
 		out["settings_error"] = err.Error()
 	}

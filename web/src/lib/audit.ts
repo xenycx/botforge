@@ -76,5 +76,16 @@ export const actionText: Record<string, string> = {
 	'site.rollback': 'rolled a site back',
 	'site.domain_add': 'added a custom domain',
 	'site.domain_verify': 'checked a custom domain',
-	'site.domain_remove': 'removed a custom domain'
+	'site.domain_remove': 'removed a custom domain',
+	'ai.conversation_create': 'opened an AI incident',
+	'ai.conversation_delete': 'deleted an AI incident',
+	'ai.run_start': 'asked the AI operator',
+	'ai.run_cancel': 'cancelled an AI run',
+	'ai.approval': 'decided an AI approval',
+	'ai.secure_input': 'entered secure values for the AI operator',
+	'ai.change_revert': 'undid an AI change',
+	'ai.file_apply': 'had the AI operator change a file',
+	'ai.diagnostic': 'had the AI operator run a diagnostic',
+	'ai.restart': 'had the AI operator restart it',
+	'ai.env_input': 'set variables through the AI operator'
 };

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/html"
@@ -32,7 +33,12 @@ type SearchResponse struct {
 	Results []SearchResult
 }
 
+// Research performs web search and public page fetches. Address checks run
+// when each connection is dialed (after DNS resolution, for every redirect
+// hop), so DNS rebinding cannot swap in an internal address after validation.
 type Research struct {
+	// HTTP replaces both clients entirely; tests only. It bypasses the
+	// connect-time address policy.
 	HTTP     *http.Client
 	Resolver *net.Resolver
 	next     atomic.Uint64
@@ -44,26 +50,120 @@ func (r *Research) resolver() *net.Resolver {
 	}
 	return net.DefaultResolver
 }
-func publicIP(ip net.IP) bool {
-	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+
+var blockedNets = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{
+		"0.0.0.0/8",      // "this" network
+		"100.64.0.0/10",  // carrier-grade NAT (also Tailscale and some cloud metadata)
+		"192.0.0.0/24",   // IETF protocol assignments
+		"198.18.0.0/15",  // benchmarking
+		"240.0.0.0/4",    // reserved, broadcast
+		"64:ff9b::/96",   // NAT64 can reach any IPv4 address
+		"64:ff9b:1::/48", // local-use NAT64
+		"2002::/16",      // 6to4 embeds IPv4 addresses
+		"fec0::/10",      // deprecated site-local
+	} {
+		_, n, _ := net.ParseCIDR(c)
+		out = append(out, n)
+	}
+	return out
+}()
+
+// metadataIP reports cloud instance-metadata endpoints, which no research
+// connection (search included) may reach.
+func metadataIP(ip net.IP) bool {
+	return ip.Equal(net.ParseIP("169.254.169.254")) || ip.Equal(net.ParseIP("100.100.100.200")) || ip.Equal(net.ParseIP("fd00:ec2::254"))
+}
+
+// PublicIP reports whether ip is a globally routable unicast address.
+func PublicIP(ip net.IP) bool {
+	if ip == nil {
 		return false
 	}
-	// Provider metadata endpoints are link-local on the major clouds, but keep
-	// explicit defense for unusual resolver representations.
-	return !ip.Equal(net.ParseIP("169.254.169.254")) && !ip.Equal(net.ParseIP("100.100.100.200"))
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || metadataIP(ip) {
+		return false
+	}
+	for _, n := range blockedNets {
+		if n.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
-func (r *Research) ValidateURL(ctx context.Context, raw string) (*url.URL, error) {
+
+var errBlockedAddress = errors.New("private, local, multicast, and metadata addresses are blocked")
+
+// dialControl runs on the resolved address of every outgoing connection.
+func dialControl(allowPrivate bool) func(network, address string, _ syscall.RawConn) error {
+	return func(network, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return errBlockedAddress
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return errBlockedAddress
+		}
+		if allowPrivate {
+			if ip.IsUnspecified() || ip.IsMulticast() || metadataIP(ip) {
+				return errBlockedAddress
+			}
+			return nil
+		}
+		if !PublicIP(ip) {
+			return errBlockedAddress
+		}
+		return nil
+	}
+}
+
+// client builds a direct (never proxied) client whose dialer enforces the
+// address policy at connect time. A proxy would hide the real destination.
+func (r *Research) client(allowPrivate bool, redirect func(*http.Request, []*http.Request) error) *http.Client {
+	if r != nil && r.HTTP != nil {
+		c := *r.HTTP
+		c.CheckRedirect = redirect
+		return &c
+	}
+	d := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Resolver: r.resolver(), Control: dialControl(allowPrivate)}
+	t := &http.Transport{Proxy: nil, DialContext: d.DialContext, ForceAttemptHTTP2: true, MaxIdleConns: 10, IdleConnTimeout: 30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second}
+	return &http.Client{Timeout: 20 * time.Second, Transport: t, CheckRedirect: redirect}
+}
+
+func syntaxURL(raw string) (*url.URL, error) {
 	u, e := url.Parse(raw)
 	if e != nil || u.Scheme != "http" && u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
+		return nil, errors.New("only HTTP(S) URLs without credentials are allowed")
+	}
+	return u, nil
+}
+
+// ValidateURL is an early, friendly check that a URL resolves only to public
+// addresses. It is not the security boundary: the dialer re-checks the
+// address actually connected to.
+func (r *Research) ValidateURL(ctx context.Context, raw string) (*url.URL, error) {
+	u, e := syntaxURL(raw)
+	if e != nil {
 		return nil, errors.New("only public HTTP(S) URLs without credentials are allowed")
 	}
+	if ip := net.ParseIP(u.Hostname()); ip != nil {
+		if !PublicIP(ip) {
+			return nil, errBlockedAddress
+		}
+		return u, nil
+	}
 	ips, e := r.resolver().LookupIP(ctx, "ip", u.Hostname())
-	if e != nil {
+	if e != nil || len(ips) == 0 {
 		return nil, errors.New("the host could not be resolved")
 	}
 	for _, ip := range ips {
-		if !publicIP(ip) {
-			return nil, errors.New("private, local, multicast, and metadata addresses are blocked")
+		if !PublicIP(ip) {
+			return nil, errBlockedAddress
 		}
 	}
 	return u, nil
@@ -73,11 +173,25 @@ func (r *Research) Search(ctx context.Context, cfg SearchConfig, q string) (Sear
 	if strings.TrimSpace(q) == "" || len(q) > 500 {
 		return SearchResponse{}, errors.New("search query is invalid")
 	}
-	base, e := r.ValidateURL(ctx, cfg.BaseURL)
+	// The administrator-configured search origin may be private (a
+	// self-hosted SearxNG); result pages are still fetched public-only.
+	base, e := syntaxURL(cfg.BaseURL)
 	if e != nil {
 		return SearchResponse{}, e
 	}
-	u := base.ResolveReference(&url.URL{Path: "/search"})
+	// Keys travel in X-API-Key, which Go would forward on a cross-origin
+	// redirect, so the search client never leaves the configured origin.
+	client := r.client(true, func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return errors.New("too many redirects")
+		}
+		if req.URL.Scheme != base.Scheme || req.URL.Host != base.Host {
+			return errors.New("the search service redirected to another origin")
+		}
+		return nil
+	})
+	defer client.CloseIdleConnections()
+	u := base.ResolveReference(&url.URL{Path: strings.TrimRight(base.Path, "/") + "/search"})
 	v := u.Query()
 	v.Set("q", q)
 	v.Set("format", "json")
@@ -108,7 +222,7 @@ func (r *Research) Search(ctx context.Context, cfg SearchConfig, q string) (Sear
 		if len(cfg.Keys) > 0 {
 			req.Header.Set("X-API-Key", cfg.Keys[(start+i)%len(cfg.Keys)])
 		}
-		resp, e := r.httpClient().Do(req)
+		resp, e := client.Do(req)
 		if e != nil {
 			return SearchResponse{}, e
 		}
@@ -149,33 +263,30 @@ func (r *Research) Search(ctx context.Context, cfg SearchConfig, q string) (Sear
 	return SearchResponse{}, last
 }
 
-func (r *Research) httpClient() *http.Client {
-	if r != nil && r.HTTP != nil {
-		return r.HTTP
-	}
-	return &http.Client{Timeout: 20 * time.Second}
-}
-
-// Fetch extracts visible text. Redirect destinations are resolved and checked
-// again, preventing redirects and DNS rebinding from reaching internal hosts.
+// Fetch extracts visible text from a public page. The URL and every redirect
+// are checked up front for a clear error; the dialer then re-checks the
+// address of each actual connection, so redirects and DNS rebinding cannot
+// reach internal hosts.
 func (r *Research) Fetch(ctx context.Context, raw string) (title, text string, err error) {
 	if _, err = r.ValidateURL(ctx, raw); err != nil {
 		return
 	}
-	base := r.httpClient()
-	client := *base
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+	client := r.client(false, func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
 		}
 		_, e := r.ValidateURL(req.Context(), req.URL.String())
 		return e
-	}
+	})
+	defer client.CloseIdleConnections()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	req.Header.Set("Accept", "text/html,application/json,text/plain;q=0.9")
 	req.Header.Set("User-Agent", "BotForge-Research/1.0")
 	resp, e := client.Do(req)
 	if e != nil {
+		if errors.Is(e, errBlockedAddress) {
+			return "", "", errBlockedAddress
+		}
 		return "", "", e
 	}
 	defer resp.Body.Close()
