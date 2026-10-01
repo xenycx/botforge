@@ -3,10 +3,19 @@ display_name: Python
 image: python:3.11-alpine
 builder_image: python:3.11-alpine
 # Managed virtual environment; always built so the default command works.
+# requirements.txt wins; otherwise a packaged project (setup.py, or a
+# pyproject.toml declaring [project] or Poetry metadata) is installed into it.
 build_argv:
   - sh
   - -c
-  - python -m venv .venv && if [ -f requirements.txt ]; then .venv/bin/pip install --no-cache-dir -r requirements.txt; fi
+  - |
+    set -e
+    python -m venv .venv
+    if [ -f requirements.txt ]; then
+      .venv/bin/pip install --no-cache-dir -r requirements.txt
+    elif [ -f setup.py ] || { [ -f pyproject.toml ] && grep -Eq '^\[(project|tool\.poetry)\]' pyproject.toml; }; then
+      .venv/bin/pip install --no-cache-dir .
+    fi
 default_argv: [/workspace/.venv/bin/python, main.py]
 allowed_commands: [python, python3, /workspace/.venv/bin/python]
 env: {PYTHONUNBUFFERED: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1"}

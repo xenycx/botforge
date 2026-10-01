@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -91,6 +92,11 @@ type botDTO struct {
 	BandwidthKbps  *int64    `json:"bandwidth_kbps"` // recorded intent; not enforced (see docs)
 	Ports          []portDTO `json:"ports"`
 	AutoBackup     bool      `json:"auto_backup"`
+	BuildCommand   string    `json:"build_command"`
+	// LogoURL is the custom logo, else the Discord avatar ("" = neither).
+	LogoURL    string   `json:"logo_url"`
+	CustomLogo bool     `json:"custom_logo"`
+	Addons     []string `json:"addons"` // attached add-on kinds (bot detail only)
 
 	RestartPolicy           string `json:"restart_policy"`
 	RestartMaxAttempts      int64  `json:"restart_max_attempts"`
@@ -184,6 +190,11 @@ func toBot(b domain.Bot) botDTO {
 	}
 	d.NetworkEnabled, d.BandwidthKbps = !b.NetworkDisabled, b.BandwidthKbps
 	d.AutoBackup = !b.AutoBackupOff
+	d.BuildCommand = b.BuildCommand
+	d.Addons = make([]string, len(b.Addons))
+	for i, a := range b.Addons {
+		d.Addons[i] = a.Kind
+	}
 	d.Ports = make([]portDTO, len(b.Ports))
 	for i, p := range b.Ports {
 		d.Ports[i] = portDTO{p.ContainerPort, p.HostPort, p.Protocol, p.HostIP}
@@ -205,6 +216,13 @@ func toBotBase(b domain.Bot) botDTO {
 		DiscordUserID: b.DiscordUserID, DiscordUsername: b.DiscordUsername, DiscordAvatarURL: b.DiscordAvatarURL,
 		Permissions: domain.PermAll,
 		Phase:       phaseOf(b, nil, true), StateReason: b.StateReason, RestartCount: b.RestartCount, NextRetryAtMS: b.NextRetryAtMS,
-		LastStartedAtMS: b.LastStartedAtMS,
+		LastStartedAtMS: b.LastStartedAtMS, LogoURL: logoURL(b), CustomLogo: b.LogoUpdatedMS > 0,
 	}
+}
+
+func logoURL(b domain.Bot) string {
+	if b.LogoUpdatedMS > 0 {
+		return fmt.Sprintf("/api/v1/bots/%s/logo?v=%d", b.ID, b.LogoUpdatedMS)
+	}
+	return b.DiscordAvatarURL
 }

@@ -18,6 +18,7 @@
 	import Packages from '$lib/components/Packages.svelte';
 	import PageStudio from '$lib/components/PageStudio.svelte';
 	import Network from '$lib/components/Network.svelte';
+	import Addons from '$lib/components/Addons.svelte';
 	import Backups from '$lib/components/Backups.svelte';
 	import Deploy from '$lib/components/Deploy.svelte';
 	import Users from '$lib/components/Users.svelte';
@@ -47,6 +48,7 @@
 		{ id: 'startup', label: 'Startup', icon: 'sliders', perm: Perm.admin },
 		{ id: 'packages', label: 'Packages', icon: 'package', perm: Perm.files },
 		{ id: 'env', label: 'Env', icon: 'key', perm: Perm.env },
+		{ id: 'addons', label: 'Add-ons', icon: 'layers', perm: 0 },
 		{ id: 'network', label: 'Network', icon: 'network', perm: Perm.admin },
 		{ id: 'page', label: 'Page', icon: 'globe', perm: Perm.console },
 		{ id: 'alerts', label: 'Health', icon: 'activity', perm: Perm.console },
@@ -101,7 +103,7 @@
 	const admin = $derived(bot ? can(bot, Perm.admin) : false);
 	// Without a runner, lifecycle requests can only fail: offer none.
 	const canPower = $derived(bot ? can(bot, Perm.power) && session.features.runner : false);
-	const configSection = $derived(['env', 'startup', 'network', 'settings'].includes(tab));
+	const configSection = $derived(['env', 'addons', 'startup', 'network', 'settings'].includes(tab));
 
 	// Tell the assistant which bot and tab are in view.
 	// A narrow window scrolls the tab row; keep the current tab visible.
@@ -128,8 +130,8 @@
 	<header class="rounded-tile border border-rule-soft bg-panel">
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3.5">
 			<a href="/dashboard" class="btn btn-quiet btn-icon btn-sm shrink-0 text-muted" aria-label="Back to bots" title="Back to bots"><Icon name="chevronLeft" size={16} /></a>
-			{#if bot.discord_avatar_url}
-				<img src={bot.discord_avatar_url} alt="" class="size-11 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" />
+			{#if bot.logo_url}
+				<img src={bot.logo_url} alt="" class="size-11 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" />
 			{:else}
 				<span class="grid size-11 shrink-0 place-items-center rounded-tile bg-paper-2/70 text-action"><Icon name="box" size={20} /></span>
 			{/if}
@@ -188,6 +190,8 @@
 			<Env {bot} running={!stopped} />
 		{:else if tab === 'startup'}
 			<Startup {bot} {stopped} onSaved={(b) => (bot = b)} />
+		{:else if tab === 'addons'}
+			<Addons {bot} {stopped} />
 		{:else if tab === 'network'}
 			<Network {bot} {stopped} owner={isOwner} onSaved={(b) => (bot = b)} />
 		{:else if tab === 'backups'}

@@ -29,6 +29,9 @@ type fakeDocker struct {
 	builderExit         int64
 	onCreate            func(spec ContainerSpec) // called with lock released, before creating
 	onStart             func(id string)
+	// listOmitsLiveStart mimics the Docker adapter, whose listing carries no
+	// start time for live containers.
+	listOmitsLiveStart bool
 
 	created  []ContainerSpec
 	starts   int
@@ -36,6 +39,34 @@ type fakeDocker struct {
 	resolved []string
 	waiting  chan struct{} // if set, builder Wait blocks until closed
 	events   chan Event
+
+	health   string              // health reported for containers with a health check
+	networks map[string]bool     // networks that exist
+	joined   map[string][]string // container id -> networks connected after create
+}
+
+func (f *fakeDocker) EnsureNetwork(ctx context.Context, name string, labels map[string]string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.networks[name] = true
+	return nil
+}
+
+func (f *fakeDocker) ConnectNetwork(ctx context.Context, network, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.networks[network] {
+		return errors.New("no such network")
+	}
+	f.joined[id] = append(f.joined[id], network)
+	return nil
+}
+
+func (f *fakeDocker) RemoveNetwork(ctx context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.networks, name)
+	return nil
 }
 
 func newFake() *fakeDocker {
@@ -43,6 +74,7 @@ func newFake() *fakeDocker {
 		conts: map[string]*ContainerInfo{}, specs: map[string]ContainerSpec{},
 		caps:   Capabilities{MemoryLimit: true, CPUQuota: true, PidsLimit: true, SwapLimit: true, CgroupV2: true},
 		events: make(chan Event, 256),
+		health: "healthy", networks: map[string]bool{}, joined: map[string][]string{},
 	}
 }
 
@@ -68,7 +100,11 @@ func (f *fakeDocker) ListManaged(ctx context.Context, botID string) ([]Container
 	var out []ContainerInfo
 	for _, c := range f.conts {
 		if botID == "" || c.Labels[LabelBot] == botID {
-			out = append(out, *c)
+			cc := *c
+			if f.listOmitsLiveStart && cc.Live() {
+				cc.StartedAt = time.Time{}
+			}
+			out = append(out, cc)
 		}
 	}
 	return out, nil
@@ -96,6 +132,9 @@ func (f *fakeDocker) Create(ctx context.Context, spec ContainerSpec) (string, er
 	}}
 	if spec.InstallID != "" {
 		f.conts[id].Labels[LabelInstall] = spec.InstallID
+	}
+	if spec.AddonKind != "" {
+		f.conts[id].Labels[LabelAddon] = spec.AddonKind
 	}
 	f.specs[id] = spec
 	f.created = append(f.created, spec)
@@ -126,6 +165,9 @@ func (f *fakeDocker) Start(ctx context.Context, id string) error {
 		return nil
 	}
 	c.State = "running"
+	if len(f.specs[id].Health) > 0 {
+		c.Health = f.health
+	}
 	return nil
 }
 

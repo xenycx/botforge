@@ -13,7 +13,7 @@ const siteCols = `s.id, s.workspace_id, s.owner_id, s.name, s.slug, s.spa, s.cle
 	s.bot_id, s.mode, s.page_title, s.page_description, s.page_theme, s.page_accent, s.page_html, s.page_css, s.widgets_public,
 	s.domain_id, COALESCE(bd.domain, ''), COALESCE(u.email, ''), COALESCE(w.name, ''),
 	(SELECT count(*) FROM site_domains d WHERE d.site_id = s.id),
-	COALESCE((SELECT r.bytes FROM site_releases r WHERE r.id = s.current_release), 0)`
+	COALESCE((SELECT r.bytes FROM site_releases r WHERE r.id = s.current_release), 0), COALESCE(s.logo_updated_at_ms, 0)`
 
 const siteFrom = ` FROM sites s LEFT JOIN users u ON u.id = s.owner_id LEFT JOIN workspaces w ON w.id = s.workspace_id
 	LEFT JOIN site_base_domains bd ON bd.id = s.domain_id`
@@ -24,7 +24,7 @@ func scanSite(row interface{ Scan(...any) error }) (domain.Site, error) {
 	err := row.Scan(&s.ID, &s.WorkspaceID, &s.OwnerID, &s.Name, &s.Slug, &spa, &clean, &s.CurrentRelease, &disabled,
 		&s.RepoFullName, &s.RepoBranch, &s.RepoRoot, &s.RepoTokenUser, &s.CreatedAtMS, &s.UpdatedAtMS,
 		&s.BotID, &s.Mode, &s.PageTitle, &s.PageDescription, &s.PageTheme, &s.PageAccent, &s.PageHTML, &s.PageCSS, &widgetsPublic,
-		&s.DomainID, &s.BaseDomain, &s.OwnerEmail, &s.WorkspaceName, &s.Domains, &s.ReleaseBytes)
+		&s.DomainID, &s.BaseDomain, &s.OwnerEmail, &s.WorkspaceName, &s.Domains, &s.ReleaseBytes, &s.LogoUpdatedMS)
 	s.SPA, s.CleanURLs, s.Disabled, s.WidgetsPublic = spa == 1, clean == 1, disabled == 1, widgetsPublic == 1
 	return s, mapErr(err)
 }

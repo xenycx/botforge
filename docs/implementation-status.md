@@ -6,6 +6,30 @@ items state exactly what remains.
 
 ## Completed in 0.4.0, 0.3.0 and since 0.2.0
 
+- [x] Hosting larger open-source bots (Unreleased), verified on a real panel
+  with Docker 29.7.2: Red-DiscordBot (built from the public repository,
+  connected to Discord) and YAGPDB (built from `cmd/yagpdb` with PostgreSQL and
+  Redis add-ons, connected to both databases).
+  - Public GitHub repositories deploy without a GitHub connection (anonymous
+    API, 60 requests/hour per address); auto-deploy polls branches without a
+    webhook every five minutes; new GitHub bots can start after their first
+    deployment. Enforcement: application level.
+  - Repository analysis (verified recipes, file detection, optional AI
+    refinement). Suggestions only prefill the creation form and are validated
+    again on create; enforcement of commands, add-ons, variables and resources
+    is application level, as for any manual input.
+  - Per-bot custom build commands (migration `0036`). They run in the existing
+    build container: isolation is Docker-runtime level, unchanged.
+  - Add-ons (PostgreSQL, Redis, MongoDB, MariaDB; migration `0036`).
+    Enforcement: container limits and hardening are Docker-runtime level; the
+    no-internet, bot-only reachability is Docker network level (`Internal`
+    bridge per bot, verified); memory budgets are application level.
+    Not provided: add-on backups, version choice, Lavalink.
+- [x] Custom bot and site logos, Discord avatar lookup with the bot's token,
+  and automatic site favicons (Unreleased; migration `0037`). Access control is
+  application level; images are validated (PNG/JPEG, size and dimensions) and
+  served sandboxed with `nosniff`.
+
 - [x] Email through Mailgun (Unreleased): password reset by emailed link,
   invitation emails, bot alerts by email, and security notices; configured in
   Panel settings (key sealed) or `BOTPANEL_MAILGUN_*`. Enforcement: the sealing,
@@ -124,7 +148,7 @@ items state exactly what remains.
   Docker-runtime-level.
 
 Migrations added since 0.2.0 (the schema-version assertion in
-`internal/store/sqlite/db_test.go` is 34):
+`internal/store/sqlite/db_test.go` is 37):
 
 | Migration | Purpose |
 | --- | --- |
@@ -139,6 +163,8 @@ Migrations added since 0.2.0 (the schema-version assertion in
 | `0033_mail.sql` | `password_resets` (hashed one-use reset links, one per account) and `users.email_alerts` (alert-email switch, default on) |
 | `0034_mail_news.sql` | `users.email_news` (optional news-email switch, default on) |
 | `0035_site_base_domains.sql` | `site_base_domains`; rebuilds `sites` with `domain_id` and a per-domain unique address (`domain_id`, `slug`) instead of a panel-wide unique slug. Runs with foreign keys off (new `-- botpanel:foreign-keys-off` migration marker, checked with `PRAGMA foreign_key_check`) so releases, custom domains and assistant chats are kept; start-up assigns existing sites to the primary domain |
+| `0036_build_command_addons.sql` | `bots.build_command` (custom build script, at most 4 KiB) and `bot_addons` (kind and memory per bot; passwords are sealed `BOTPANEL_ADDON_<KIND>_PASSWORD` rows in `bot_env_vars`) |
+| `0037_logos.sql` | `bots` and `sites` gain `logo`, `logo_type` and `logo_updated_at_ms` for custom logos (PNG/JPEG, at most 256 KiB) |
 | `0030_ai_global_chat.sql` | Rebuilds `ai_conversations` so a chat may have no target; `ai_runs.bot_id`/`site_id`, `ai_messages.context_json` (the conversation subtree is stashed and restored, rows preserved) |
 
 Known gaps in this work:
@@ -234,8 +260,10 @@ network, filesystem, or container-runtime mechanism.
 - [ ] Dependency and license intelligence: npm/pip/Cargo audits, lockfile
   handling, update pull requests, and license checks.
 - [~] Custom domains and automatic TLS exist for static sites (TLS through the
-  reverse proxy's on-demand issuance). Multi-container bots, named volumes,
-  and custom domains for bot HTTP ports remain.
+  reverse proxy's on-demand issuance). Bots can now run companion database
+  containers (add-ons); arbitrary multi-container bots (any image, e.g.
+  Lavalink), named volumes, add-on backups and custom domains for bot HTTP
+  ports remain.
 - [ ] Pull-request previews and health-gated blue/green or canary rollout.
 - [ ] A supported panel plugin model for custom pages and jobs.
 - [ ] .NET, Deno/Bun, PHP, and opt-in custom Dockerfile runtimes.

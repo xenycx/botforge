@@ -8,6 +8,7 @@ import (
 
 	"botpanel/internal/domain"
 	"botpanel/internal/filesystem"
+	"botpanel/internal/reposcan"
 	"botpanel/internal/service"
 	"botpanel/internal/templates"
 )
@@ -48,11 +49,12 @@ type repoDTO struct {
 	LastDeployedMS int64  `json:"last_deployed_at_ms"`
 	LastError      string `json:"last_error"`
 	Deploying      bool   `json:"deploying"`
+	Polling        bool   `json:"polling"`
 }
 
 func toRepo(v service.RepoView) repoDTO {
 	return repoDTO{v.FullName, v.Branch, v.RootDir, v.Private, v.AutoDeploy, v.HookCreated, v.WebhookURL, v.Secret,
-		v.LastSHA, v.LastDeployedMS, v.LastError, v.Deploying}
+		v.LastSHA, v.LastDeployedMS, v.LastError, v.Deploying, v.Polling}
 }
 
 func (s *server) githubRepos(c fiber.Ctx) error {
@@ -69,6 +71,39 @@ func (s *server) githubBranches(c fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(fiber.Map{"branches": bs})
+}
+
+// githubLookup resolves a pasted repository address; public repositories
+// need no GitHub connection.
+func (s *server) githubLookup(c fiber.Ctx) error {
+	r, err := s.deploy.Lookup(c.Context(), currentUser(c), strings.Clone(c.Query("repo")))
+	if err != nil {
+		return err
+	}
+	return c.JSON(r)
+}
+
+// analyzeGitHub suggests how to host a repository (it creates nothing).
+func (s *server) analyzeGitHub(c fiber.Ctx) error {
+	var in struct {
+		Repo    string `json:"repo"`
+		Branch  string `json:"branch"`
+		RootDir string `json:"root_dir"`
+		AI      bool   `json:"ai"`
+	}
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	a, err := s.deploy.Analyze(c.Context(), currentUser(c), service.AnalyzeInput{Repo: in.Repo, Branch: in.Branch, RootDir: in.RootDir, UseAI: in.AI})
+	if err != nil {
+		return err
+	}
+	return c.JSON(a)
+}
+
+// listRecipes returns the verified recipes for well-known open-source bots.
+func (s *server) listRecipes(c fiber.Ctx) error {
+	return c.JSON(fiber.Map{"recipes": reposcan.Recipes()})
 }
 
 func (s *server) getGitHub(c fiber.Ctx) error {

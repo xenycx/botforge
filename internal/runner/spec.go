@@ -48,8 +48,9 @@ func specHash(role Role, imageRef string, argv []string, s ContainerSpec) string
 		// omitempty keeps the hash of pre-existing bots unchanged.
 		Entrypoint []string      `json:",omitempty"`
 		Ports      []PortBinding `json:",omitempty"`
+		Networks   []string      `json:",omitempty"`
 	}{role, imageRef, argv, s.User, s.Network, s.WorkspaceHostPath, s.MemoryBytes, s.NanoCPUs, s.PidsLimit, s.TmpfsBytes, s.OpenStdin,
-		s.Entrypoint, s.Ports})
+		s.Entrypoint, s.Ports, s.Networks})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:16])
 }
@@ -59,13 +60,22 @@ func specHash(role Role, imageRef string, argv []string, s ContainerSpec) string
 // it can be evaluated without contacting Docker.
 func (r *Runner) runtimeSpec(bot domain.Bot, rt runtimes.Runtime, image, host string, botEnv map[string]string) ContainerSpec {
 	network := r.opts.Network
+	var extra []string
+	if len(bot.Addons) > 0 {
+		extra = []string{AddonNetwork(bot.ID)}
+	}
 	if bot.NetworkDisabled {
 		network = "none" // no outbound access and, therefore, no published ports
+		if len(extra) > 0 {
+			// The internal add-on network has no route out either.
+			network, extra = extra[0], nil
+		}
 	}
+	provided, own := addonEnv(bot, botEnv)
 	s := ContainerSpec{
 		Name: ContainerName(bot.ID, RoleRuntime), Role: RoleRuntime, BotID: bot.ID, NodeID: bot.NodeID, InstallID: r.opts.InstallID,
 		Generation: bot.Generation, Image: image, Argv: bot.Argv, Entrypoint: bot.Entrypoint, Ports: portBindings(bot),
-		Env:               envList(rt.Env, botEnv),
+		Env: envList(rt.Env, provided, own), Networks: extra,
 		WorkspaceHostPath: host, User: r.opts.User, Network: network,
 		MemoryBytes: bot.MemoryBytes, NanoCPUs: bot.NanoCPUs, PidsLimit: bot.PidsLimit,
 		TmpfsBytes: r.opts.TmpfsBytes, OpenStdin: true,
@@ -100,15 +110,25 @@ func maxInt64(a, b int64) int64 {
 // builderSpec builds the dependency-install/compile container. It gets no bot
 // secrets, only the catalog environment.
 func (r *Runner) builderSpec(bot domain.Bot, rt runtimes.Runtime, image, host string) ContainerSpec {
+	argv := rt.BuildArgv
+	if bot.BuildCommand != "" {
+		argv = BuildCommandArgv(bot.BuildCommand)
+	}
 	s := ContainerSpec{
 		Name: ContainerName(bot.ID, RoleBuilder), Role: RoleBuilder, BotID: bot.ID, NodeID: bot.NodeID, InstallID: r.opts.InstallID,
-		Generation: bot.Generation, Image: image, Argv: rt.BuildArgv, Env: envList(rt.Env),
+		Generation: bot.Generation, Image: image, Argv: argv, Env: envList(rt.Env),
 		WorkspaceHostPath: host, User: r.opts.User, Network: r.opts.Network,
 		MemoryBytes: maxInt64(maxInt64(bot.MemoryBytes, r.opts.BuildMemory), rt.BuildMemoryBytes), NanoCPUs: maxInt64(bot.NanoCPUs, r.opts.BuildNanoCPUs),
 		PidsLimit: maxInt64(bot.PidsLimit, r.opts.BuildPids), TmpfsBytes: r.opts.BuildTmpfsBytes,
 	}
-	s.SpecHash = specHash(RoleBuilder, rt.BuilderImage, rt.BuildArgv, s)
+	s.SpecHash = specHash(RoleBuilder, rt.BuilderImage, argv, s)
 	return s
+}
+
+// BuildCommandArgv runs a bot's custom build command. `set -e` stops at the
+// first failing line, as people expect from a list of commands.
+func BuildCommandArgv(script string) []string {
+	return []string{"sh", "-c", "set -e\n" + script}
 }
 
 func describeExit(c ContainerInfo) string {

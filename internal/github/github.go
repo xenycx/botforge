@@ -29,6 +29,16 @@ var (
 	shaRe      = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
+// ValidFullName reports whether s is "owner/name" with neither part being
+// "." or ".." (which would change the API path).
+func ValidFullName(s string) bool {
+	if !FullNameRe.MatchString(s) {
+		return false
+	}
+	o, n, _ := strings.Cut(s, "/")
+	return strings.Trim(o, ".") != "" && strings.Trim(n, ".") != ""
+}
+
 // ValidBranch reports whether name is a plausible, safe branch name.
 func ValidBranch(name string) bool {
 	return branchRe.MatchString(name) && !strings.HasPrefix(name, "-") && !strings.HasPrefix(name, "/") &&
@@ -41,6 +51,10 @@ var ErrInvalid = errors.New("invalid repository, branch or commit name")
 // ErrNotFound means the repository or ref does not exist or is not visible to the token.
 var ErrNotFound = errors.New("repository or branch not found (or no access)")
 
+// ErrRateLimited means GitHub's API rate limit is used up (anonymous
+// requests get 60 per hour per address).
+var ErrRateLimited = errors.New("GitHub's rate limit is used up; try again later or connect your GitHub account for a higher limit")
+
 // ErrUnauthorized means the token was rejected.
 var ErrUnauthorized = errors.New("GitHub rejected the token; reconnect your GitHub account")
 
@@ -50,12 +64,68 @@ type Client struct {
 	HTTP *http.Client
 }
 
-// Repo is a repository summary.
+// Repo is a repository summary. The descriptive fields are filled by GetRepo
+// (and by listings, where GitHub includes them).
 type Repo struct {
 	FullName      string `json:"full_name"`
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
 	HTMLURL       string `json:"html_url"`
+	Description   string `json:"description,omitempty"`
+	Language      string `json:"language,omitempty"`
+	Stars         int    `json:"stargazers_count,omitempty"`
+	Archived      bool   `json:"archived,omitempty"`
+	PushedAt      string `json:"pushed_at,omitempty"`
+	SizeKB        int64  `json:"size,omitempty"`
+	License       *struct {
+		SPDX string `json:"spdx_id"`
+	} `json:"license,omitempty"`
+}
+
+// RepoRef is a repository reference pasted by a person.
+type RepoRef struct {
+	FullName string
+	Branch   string // from a /tree/<branch>/... address; may contain "/" ambiguity, see ParseRepoRef
+	Path     string // folder inside the repository
+}
+
+// ParseRepoRef accepts "owner/name", "github.com/owner/name",
+// "https://github.com/owner/name(.git)", ".../tree/<branch>[/<folder>]" and
+// "git@github.com:owner/name.git". A branch in a /tree/ address is taken as
+// the first path segment (branch names containing "/" need the branch picker).
+func ParseRepoRef(in string) (RepoRef, error) {
+	s := strings.TrimSpace(in)
+	s = strings.TrimPrefix(s, "git+")
+	if rest, ok := strings.CutPrefix(s, "git@github.com:"); ok {
+		s = "github.com/" + rest
+	}
+	for _, p := range []string{"https://", "http://", "ssh://git@", "git://"} {
+		s = strings.TrimPrefix(s, p)
+	}
+	s = strings.TrimPrefix(s, "www.")
+	s = strings.TrimPrefix(s, "github.com/")
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.Trim(s, "/")
+	parts := strings.Split(s, "/")
+	if len(parts) < 2 {
+		return RepoRef{}, ErrInvalid
+	}
+	ref := RepoRef{FullName: parts[0] + "/" + strings.TrimSuffix(parts[1], ".git")}
+	if !ValidFullName(ref.FullName) {
+		return RepoRef{}, ErrInvalid
+	}
+	if len(parts) >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
+		ref.Branch = parts[3]
+		if !ValidBranch(ref.Branch) {
+			return RepoRef{}, ErrInvalid
+		}
+		if parts[2] == "tree" && len(parts) > 4 {
+			ref.Path = strings.Join(parts[4:], "/")
+		}
+	}
+	return ref, nil
 }
 
 func (c *Client) base() string {
@@ -95,6 +165,10 @@ func (c *Client) do(ctx context.Context, method, path, token string, body any) (
 }
 
 func statusErr(res *http.Response) error {
+	if (res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusTooManyRequests) &&
+		res.Header.Get("X-RateLimit-Remaining") == "0" {
+		return ErrRateLimited
+	}
 	switch res.StatusCode {
 	case http.StatusUnauthorized:
 		return ErrUnauthorized
@@ -135,7 +209,7 @@ func (c *Client) Repos(ctx context.Context, token string) ([]Repo, error) {
 
 // GetRepo returns one repository (token may be empty for public repositories).
 func (c *Client) GetRepo(ctx context.Context, token, fullName string) (Repo, error) {
-	if !FullNameRe.MatchString(fullName) {
+	if !ValidFullName(fullName) {
 		return Repo{}, ErrInvalid
 	}
 	var r Repo
@@ -145,7 +219,7 @@ func (c *Client) GetRepo(ctx context.Context, token, fullName string) (Repo, err
 
 // Branches lists branch names (up to 300).
 func (c *Client) Branches(ctx context.Context, token, fullName string) ([]string, error) {
-	if !FullNameRe.MatchString(fullName) {
+	if !ValidFullName(fullName) {
 		return nil, ErrInvalid
 	}
 	var out []string
@@ -166,7 +240,7 @@ func (c *Client) Branches(ctx context.Context, token, fullName string) ([]string
 
 // BranchSHA resolves a branch to its head commit.
 func (c *Client) BranchSHA(ctx context.Context, token, fullName, branch string) (string, error) {
-	if !FullNameRe.MatchString(fullName) || !ValidBranch(branch) {
+	if !ValidFullName(fullName) || !ValidBranch(branch) {
 		return "", ErrInvalid
 	}
 	var o struct{ SHA string }
@@ -182,7 +256,7 @@ func (c *Client) BranchSHA(ctx context.Context, token, fullName, branch string) 
 // Tarball opens the gzip tarball of a commit. The API redirects to codeload;
 // Go drops the Authorization header on the cross-host redirect.
 func (c *Client) Tarball(ctx context.Context, token, fullName, sha string) (io.ReadCloser, error) {
-	if !FullNameRe.MatchString(fullName) || !shaRe.MatchString(sha) {
+	if !ValidFullName(fullName) || !shaRe.MatchString(sha) {
 		return nil, ErrInvalid
 	}
 	hc := *c.hc()
@@ -201,7 +275,7 @@ func (c *Client) Tarball(ctx context.Context, token, fullName, sha string) (io.R
 
 // CreateHook registers a push webhook and returns its id.
 func (c *Client) CreateHook(ctx context.Context, token, fullName, hookURL, secret string) (int64, error) {
-	if !FullNameRe.MatchString(fullName) {
+	if !ValidFullName(fullName) {
 		return 0, ErrInvalid
 	}
 	res, err := c.do(ctx, http.MethodPost, "/repos/"+fullName+"/hooks", token, map[string]any{
@@ -224,7 +298,7 @@ func (c *Client) CreateHook(ctx context.Context, token, fullName, hookURL, secre
 
 // DeleteHook removes a webhook; a missing one is not an error.
 func (c *Client) DeleteHook(ctx context.Context, token, fullName string, id int64) error {
-	if !FullNameRe.MatchString(fullName) {
+	if !ValidFullName(fullName) {
 		return ErrInvalid
 	}
 	res, err := c.do(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/hooks/%d", fullName, id), token, nil)
@@ -267,7 +341,7 @@ type Comparison struct {
 // Compare lists commits and changed files from base to head. GitHub itself
 // caps the file list (300); the result is further bounded here.
 func (c *Client) Compare(ctx context.Context, token, fullName, base, head string) (Comparison, error) {
-	if !FullNameRe.MatchString(fullName) || !shaRe.MatchString(base) || !shaRe.MatchString(head) {
+	if !ValidFullName(fullName) || !shaRe.MatchString(base) || !shaRe.MatchString(head) {
 		return Comparison{}, ErrInvalid
 	}
 	var o struct {
@@ -411,7 +485,7 @@ func (c *Client) postJSON(ctx context.Context, method, path, token string, body,
 // BranchHead returns the commit a branch points at; ErrNotFound when the
 // branch does not exist.
 func (c *Client) BranchHead(ctx context.Context, token, fullName, branch string) (string, error) {
-	if !FullNameRe.MatchString(fullName) || !ValidBranch(branch) {
+	if !ValidFullName(fullName) || !ValidBranch(branch) {
 		return "", ErrInvalid
 	}
 	var o struct {
@@ -438,7 +512,7 @@ type TreeEntry struct {
 // trees (very large repositories) are refused rather than pushed over
 // incompletely.
 func (c *Client) CommitFiles(ctx context.Context, token, fullName, commit string) (string, []TreeEntry, error) {
-	if !FullNameRe.MatchString(fullName) || !shaRe.MatchString(commit) {
+	if !ValidFullName(fullName) || !shaRe.MatchString(commit) {
 		return "", nil, ErrInvalid
 	}
 	var cm struct {
@@ -493,7 +567,7 @@ func (c *Client) CreateCommit(ctx context.Context, token, fullName, message, tre
 // MoveBranch fast-forwards a branch to commit (never forced: a branch that
 // moved meanwhile returns ErrConflict), or creates it when create is set.
 func (c *Client) MoveBranch(ctx context.Context, token, fullName, branch, commit string, create bool) error {
-	if !FullNameRe.MatchString(fullName) || !ValidBranch(branch) || !shaRe.MatchString(commit) {
+	if !ValidFullName(fullName) || !ValidBranch(branch) || !shaRe.MatchString(commit) {
 		return ErrInvalid
 	}
 	if create {

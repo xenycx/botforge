@@ -100,6 +100,15 @@ stats stream over Server-Sent Events. Disk is the size of the bot's workspace
 Only programs approved for the runtime (`runtimes/*.yaml`) are accepted, and
 the command runs directly, never through a shell.
 
+**Build command** (optional) replaces the runtime's default build step, for
+example `cd cmd/mybot && go build -o /workspace/app .` or `npm ci && npm run
+build`. It runs as `sh -c` with `set -e` in the runtime's builder container
+before every start, with the same resource limits, internet access and **no
+bot variables**: the same privileges as the package-manager install scripts
+that already run there. At most 4 KiB. The default Python build now also
+installs packaged projects (`setup.py`, or `pyproject.toml` with `[project]` or
+Poetry metadata) when there is no `requirements.txt`.
+
 Restart policy: `on_failure` (default) restarts after a non-zero exit with
 exponential backoff and a limit on consecutive crashes (0 = unlimited); `never`
 leaves the bot down. A clean exit is never restarted. When the runner gives up,
@@ -170,8 +179,13 @@ only while building.
 
 ## GitHub deployments
 
-Link a bot to a repository, branch and optional root directory. Requires GitHub
-sign-in with repository access (`oauth.md`). The panel downloads the commit's
+Link a bot to a repository, branch and optional root directory. **Any public
+repository works without a GitHub connection**: paste `owner/name` or a GitHub
+link (a `/tree/<branch>/<folder>` link fills in the branch and folder too). A
+GitHub connection (`oauth.md`) is needed for private repositories, listing your
+own repositories, publishing and pushing, and raises GitHub's rate limit from
+60 anonymous requests per hour (shared by the panel's address) to 5,000. When
+the connection exists it is used for public repositories as well. The panel downloads the commit's
 **tarball** through the GitHub API and unpacks it with the contained extractor:
 no `git`, hooks or filters run on the host. **Deployments** shows the release,
 "What changed?" (commits and files between the deployed commit and the branch),
@@ -184,7 +198,98 @@ files; the deployed commit is recorded before the previous files are dropped.
 A Stop, Delete or Unlink that arrives during a deployment wins.
 
 Auto-deploy uses a push webhook authenticated by HMAC-SHA256; unauthenticated
-deliveries always get the same `401`. Limits: no submodules or Git LFS.
+deliveries always get the same `401`. A webhook needs your GitHub connection
+with admin rights on the repository and a public panel address; otherwise (for
+example someone else's public repository) the panel **polls** the branch every
+five minutes and deploys a new head once (a failing commit is not retried every
+interval). Polling uses the linking account's token when there is one. Limits:
+no submodules or Git LFS.
+
+When creating a bot from GitHub, **Start the bot after the first deployment**
+starts it once the files are in place (the bot is otherwise created stopped).
+
+### Analyzing a repository
+
+**Analyze repository** in the new-bot flow downloads the branch once and
+suggests the language, start command, build command, variables (with
+descriptions, required/secret flags and safe defaults), databases and
+resources, plus setup steps such as privileged intents. Sources, in order:
+
+1. **Verified recipes** for well-known bots (Red-DiscordBot, YAGPDB), tested on
+   a real panel. They are offered as one-click buttons under *Popular
+   open-source bots*.
+2. **Detection** from files: `package.json` (start script, TypeScript build,
+   Yarn/pnpm), `requirements.txt`/`pyproject.toml`/`setup.py`/`Pipfile`,
+   `go.mod` with the `package main` directories (`cmd/<name>`), `Cargo.toml`,
+   Maven/Gradle, `Gemfile`; `.env.example`-style files (comments become
+   descriptions; example values are kept only when they are not placeholders or
+   secrets); variables the code reads (`process.env.X`, `os.getenv`,
+   `os.Getenv`, `env::var`, ...); database clients and docker-compose images
+   (PostgreSQL, Redis, MongoDB, MariaDB/MySQL); Dockerfile `CMD` and `EXPOSE`.
+3. Optionally **refined by the AI** (*Refine with AI*, when an administrator
+   configured a provider): file excerpts (at most about 60 KB: manifests,
+   example configuration, entry files, README) and the detected plan are sent
+   to the provider, which returns a plan as JSON.
+
+Every suggestion only prefills the form; nothing is created or run until you
+create the bot. The server validates suggestions again (start commands must be
+allowed for the runtime, unknown add-ons and reserved variables are dropped,
+secret values are never prefilled, resources are clamped to the limits), and
+repository text is treated as untrusted data in the AI prompt. **Review a
+suggested build command before creating the bot**: it runs in the build
+container. Limits: archives up to 512 MiB compressed are read; at most 4,000
+paths and 48 MiB of source are inspected; 60 variables are listed.
+
+## Add-ons (databases)
+
+A bot can run up to four companion databases next to it: **PostgreSQL 17**,
+**Redis 7**, **MongoDB 7** and **MariaDB 11**. Add them while creating a bot
+(*Start, build and databases*) or on the bot's **Add-ons** tab (bot stopped).
+
+* Each add-on is its own container with a memory limit (default 128–512 MiB),
+  CPU and PID limits, a read-only root filesystem, all capabilities dropped,
+  `no-new-privileges` and the panel's unprivileged container user.
+* Add-ons join a private, **internal** Docker network per bot
+  (`botpanel-<bot>-net`): they have **no internet access**, only that bot (and
+  its other add-ons) can reach them, by host name (`postgres`, `redis`,
+  `mongodb`, `mariadb`). The bot keeps its normal network and joins the private
+  one; a bot with networking disabled uses only the private network.
+* The bot receives connection variables automatically, for example
+  `DATABASE_URL`, `POSTGRES_PASSWORD`, `REDIS_URL`, `MONGODB_URI` and
+  `MYSQL_URL` (*Show connection* reveals them). Your own variables can
+  reference them as `${NAME}`, for example
+  `YAGPDB_PQPASSWORD=${POSTGRES_PASSWORD}`; unknown references and lone `$`
+  signs are left as written.
+* Passwords are generated (144 bits) and stored sealed like other variables
+  (as hidden `BOTPANEL_ADDON_<KIND>_PASSWORD` rows, so key rotation and
+  verification cover them); they never appear in container labels. Redis has
+  no password: the private network is its access control.
+* Add-ons start before the bot and the bot is created only after their health
+  checks pass (up to three minutes); they stop with the bot and keep their
+  containers, so a restart reuses them. A crashed add-on is restarted while the
+  bot runs. The tab shows state, health, memory, data size and the last 200
+  log lines.
+* Data lives in `<database directory>/addons/<bot>/<kind>`, outside the bot's
+  workspace (file manager, SFTP and deployments never touch it). Removing an
+  add-on or deleting the bot deletes its data.
+* Add-on memory counts toward per-user and node memory budgets.
+
+Limits: one add-on of each kind per bot; add-on data is **not** included in
+bot backups or `botpanel backup` (dump it from the bot, for example with
+`pg_dump`); no version choice or extensions; no Lavalink yet.
+
+## Logos
+
+Bots and sites can have a **custom logo** (PNG or JPEG, resized in the browser
+to at most 256×256, stored up to 256 KiB). A bot shows its custom logo, else
+its Discord avatar. The avatar arrives through the telemetry SDK, or
+**Get avatar from Discord** (bot Settings) asks Discord's API for the bot user
+with the token found in the bot's variables (`DISCORD_TOKEN`, `BOT_TOKEN`,
+`TOKEN`, `RED_TOKEN`, `YAGPDB_BOTTOKEN`, ... or any value shaped like a bot
+token); the token is only sent to Discord. A site shows its custom logo, else
+the favicon of its active release (the `<link rel="icon">` in `index.html`, or
+`favicon.ico`/`.png`/`.svg`), else its bot's logo. Logos are served to signed-in
+people with access only, sandboxed and without content sniffing.
 
 ### Publishing a bot to GitHub
 

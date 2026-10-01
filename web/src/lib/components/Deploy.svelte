@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api/client';
-	import type { Bot, Connection, GitHubRepo, OpPage, Operation, RepoLink } from '$lib/api/types';
+	import type { Bot, Connection, GitHubRepo, OpPage, Operation, RepoLink, RepoLookup } from '$lib/api/types';
 	import { fmtAgo } from '$lib/args';
 	import { confirmDialog } from '$lib/ui/dialogs.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
@@ -67,12 +67,18 @@
 		}
 	}
 
+	// Accepts one of the person's repositories or any public one (owner/name or
+	// a GitHub link), resolved through the lookup endpoint.
 	async function pickRepo() {
 		branches = [];
-		form.branch = repos.find((x) => x.full_name === form.full_name)?.default_branch ?? '';
-		if (!form.full_name) return;
+		error = '';
+		if (!form.full_name.trim()) return;
 		try {
-			branches = (await api<{ branches: string[] }>('GET', `/me/github/branches?repo=${encodeURIComponent(form.full_name)}`)).branches;
+			const r = await api<RepoLookup>('GET', `/github/lookup?repo=${encodeURIComponent(form.full_name.trim())}`);
+			form.full_name = r.repo.full_name;
+			form.branch = r.branch;
+			if (r.root_dir) form.root_dir = r.root_dir;
+			branches = r.branches;
 		} catch (e) {
 			error = msg(e);
 		}
@@ -166,7 +172,7 @@
 			<div class="flex flex-wrap items-start gap-3">
 				<div class="min-w-0 flex-1">
 					<p class="flex items-center gap-2 text-title font-semibold"><Icon name="github" /><span class="break-all">{link.full_name}</span></p>
-					<p class="text-muted">Branch <code>{link.branch}</code>{link.root_dir ? `, folder /${link.root_dir}` : ''}. {link.auto_deploy ? (link.hook_created ? 'Deploys on every push.' : 'Waiting for the webhook to be added.') : 'Deploys when you ask.'}</p>
+					<p class="text-muted">Branch <code>{link.branch}</code>{link.root_dir ? `, folder /${link.root_dir}` : ''}. {link.auto_deploy ? (link.hook_created ? 'Deploys on every push.' : link.polling ? 'Checks for new commits every few minutes.' : 'Waiting for the webhook to be added.') : 'Deploys when you ask.'}</p>
 					<p class="mt-2">
 						{#if link.deploying}
 							<span class="font-medium text-warn">Deploying now</span>{#if latest?.status === 'running'}: {latest.stage}{/if}
@@ -212,7 +218,7 @@
 			{/if}
 		</section>
 
-		{#if secret || (link.auto_deploy && !link.hook_created)}
+		{#if secret || (link.auto_deploy && !link.hook_created && !link.polling)}
 			<Notice tone="warn" class="mt-4" title="Add this webhook in the repository settings">
 				<dl class="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
 					<dt class="text-muted">Payload URL</dt><dd><code class="break-all">{link.webhook_url}</code></dd>
@@ -220,7 +226,7 @@
 					<dt class="text-muted">Secret</dt><dd>{#if secret}<code class="break-all">{secret}</code>{:else}<span class="text-muted">shown once, after you save the settings again</span>{/if}</dd>
 					<dt class="text-muted">Events</dt><dd>Just the push event</dd>
 				</dl>
-				<p class="mt-1 text-small text-muted">GitHub did not accept the webhook automatically. The connected account may lack admin rights on the repository.</p>
+				<p class="mt-1 text-small text-muted">GitHub did not accept the webhook automatically. The connected account may lack admin rights on the repository.{#if link.polling} Until it is added, the panel checks the branch every few minutes.{/if}</p>
 			</Notice>
 		{/if}
 
@@ -266,41 +272,37 @@
 			{/if}
 			{#if settingsOpen}
 				{#if !conn?.linked}
-					<Notice class="mt-3" title="Connect GitHub first">Your GitHub connection is used to list repositories and download code. <a href="/settings/connected-accounts">Open connected accounts</a></Notice>
-				{:else}
-					{#if !conn.repo_access}
-						<Notice class="mt-3">Only public repositories are available until you grant repository access in <a href="/settings/connected-accounts">Connected accounts</a>. That also lets the panel add the webhook for you.</Notice>
-					{/if}
-					<form class="mt-4 grid max-w-2xl gap-4" onsubmit={save}>
+					<Notice class="mt-3">Any public repository works. To use private ones and have pushes deploy instantly through a webhook, <a href="/settings/connected-accounts">connect GitHub</a>; otherwise the branch is checked every few minutes.</Notice>
+				{:else if !conn.repo_access}
+					<Notice class="mt-3">Only public repositories are available until you grant repository access in <a href="/settings/connected-accounts">Connected accounts</a>. That also lets the panel add the webhook for you.</Notice>
+				{/if}
+				<form class="mt-4 grid max-w-2xl gap-4" onsubmit={save}>
+					<label class="block">
+						<span class="label">Repository</span>
+						<input class="field font-mono" required bind:value={form.full_name} onchange={pickRepo} list="dep-repos" placeholder="owner/name or https://github.com/owner/name" spellcheck="false" autocomplete="off" />
+						<datalist id="dep-repos">{#each repos as r (r.full_name)}<option value={r.full_name}>{r.private ? 'private' : ''}</option>{/each}</datalist>
+						<span class="help">Pick one of yours or paste any public repository.</span>
+					</label>
+					<div class="grid gap-4 sm:grid-cols-2">
 						<label class="block">
-							<span class="label">Repository</span>
-							<select class="field" required bind:value={form.full_name} onchange={pickRepo}>
-								<option value="" disabled>Select a repository</option>
-								{#if form.full_name && !repos.some((r) => r.full_name === form.full_name)}<option value={form.full_name}>{form.full_name}</option>{/if}
-								{#each repos as r (r.full_name)}<option value={r.full_name}>{r.full_name}{r.private ? ' (private)' : ''}</option>{/each}
+							<span class="label">Branch</span>
+							<select class="field" required bind:value={form.branch}>
+								{#if form.branch && !branches.includes(form.branch)}<option value={form.branch}>{form.branch}</option>{/if}
+								{#each branches as b (b)}<option value={b}>{b}</option>{/each}
 							</select>
 						</label>
-						<div class="grid gap-4 sm:grid-cols-2">
-							<label class="block">
-								<span class="label">Branch</span>
-								<select class="field" required bind:value={form.branch}>
-									{#if form.branch && !branches.includes(form.branch)}<option value={form.branch}>{form.branch}</option>{/if}
-									{#each branches as b (b)}<option value={b}>{b}</option>{/each}
-								</select>
-							</label>
-							<label class="block">
-								<span class="label">Folder inside the repository</span>
-								<input class="field font-mono" bind:value={form.root_dir} placeholder="/" maxlength="200" />
-								<span class="help">Leave empty for the whole repository.</span>
-							</label>
-						</div>
-						<label class="flex items-start gap-2.5"><input type="checkbox" class="mt-0.5" bind:checked={form.auto_deploy} /><span>Deploy automatically on every push to this branch<span class="help">The panel adds a webhook to the repository.</span></span></label>
-						<div class="flex flex-wrap gap-2">
-							<button class="btn btn-primary" disabled={saving}>{link ? 'Save settings' : 'Link repository'}</button>
-							{#if link}<button type="button" class="btn btn-danger" onclick={unlink}>Unlink repository</button>{/if}
-						</div>
-					</form>
-				{/if}
+						<label class="block">
+							<span class="label">Folder inside the repository</span>
+							<input class="field font-mono" bind:value={form.root_dir} placeholder="/" maxlength="200" />
+							<span class="help">Leave empty for the whole repository.</span>
+						</label>
+					</div>
+					<label class="flex items-start gap-2.5"><input type="checkbox" class="mt-0.5" bind:checked={form.auto_deploy} /><span>Deploy automatically when this branch changes<span class="help">The panel adds a webhook when your GitHub account administers the repository, and otherwise checks the branch every few minutes.</span></span></label>
+					<div class="flex flex-wrap gap-2">
+						<button class="btn btn-primary" disabled={saving}>{link ? 'Save settings' : 'Link repository'}</button>
+						{#if link}<button type="button" class="btn btn-danger" onclick={unlink}>Unlink repository</button>{/if}
+					</div>
+				</form>
 			{/if}
 		</section>
 	{:else if !link}

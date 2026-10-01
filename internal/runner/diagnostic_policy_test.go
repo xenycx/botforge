@@ -91,6 +91,7 @@ func TestResyncSweepsOnlyOrphanedDiagnosticContainers(t *testing.T) {
 	lab := func() map[string]string {
 		return map[string]string{LabelManaged: "true", LabelBot: botID, LabelNode: g.r.opts.NodeID, LabelRole: string(RoleDiagnostic), LabelInstall: "install-1"}
 	}
+	g.fd.listOmitsLiveStart = true // the real adapter only reports start times through Inspect
 	g.fd.conts["fresh"] = &ContainerInfo{ID: "fresh", Name: "d-fresh", State: "exited", FinishedAt: g.now.Add(-time.Minute), Labels: lab()}
 	g.fd.conts["old"] = &ContainerInfo{ID: "old", Name: "d-old", State: "exited", FinishedAt: g.now.Add(-2 * time.Hour), Labels: lab()}
 	g.fd.conts["hung"] = &ContainerInfo{ID: "hung", Name: "d-hung", State: "running", StartedAt: g.now.Add(-2 * time.Hour), Labels: lab()}

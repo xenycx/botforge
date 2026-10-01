@@ -216,6 +216,26 @@ func (db *DB) ListAutoDeployRepos(ctx context.Context, fullName string) ([]domai
 	return out, rows.Err()
 }
 
+// ListPollingRepos returns auto-deploy sources without a webhook, whose
+// branches the deploy service checks periodically.
+func (db *DB) ListPollingRepos(ctx context.Context, limit int) ([]domain.GitHubRepo, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+repoCols+` FROM github_repos r WHERE auto_deploy = 1 AND hook_id IS NULL
+		AND EXISTS (SELECT 1 FROM bots b WHERE b.id = r.bot_id AND b.desired_state != 'deleted') ORDER BY updated_at_ms LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.GitHubRepo
+	for rows.Next() {
+		r, err := scanRepo(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (db *DB) RecordDeploy(ctx context.Context, botID string, sha *string, errMsg *string, nowMS int64) error {
 	_, err := db.ExecContext(ctx, `UPDATE github_repos SET last_deployed_sha = COALESCE(?, last_deployed_sha),
 		last_deployed_at_ms = ?, last_error = ?, updated_at_ms = ? WHERE bot_id = ?`, sha, nowMS, errMsg, nowMS, botID)

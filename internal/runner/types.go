@@ -22,6 +22,10 @@ const (
 	LabelGeneration = "botpanel.generation"
 	LabelRole       = "botpanel.role"
 	LabelSpec       = "botpanel.spec"
+	// LabelAddon names the add-on kind of a RoleAddon container.
+	LabelAddon = "botpanel.addon"
+	// LabelNetwork marks a per-bot private network created by the runner.
+	LabelNetwork = "botpanel.network"
 )
 
 // Role distinguishes build containers from long-running bot containers.
@@ -31,6 +35,8 @@ const (
 	RoleRuntime    Role = "runtime"
 	RoleBuilder    Role = "builder"
 	RoleDiagnostic Role = "diagnostic"
+	// RoleAddon is a companion service (database, cache) of a bot.
+	RoleAddon Role = "addon"
 )
 
 var (
@@ -95,6 +101,24 @@ type ContainerSpec struct {
 	PidsLimit   int64
 	TmpfsBytes  int64
 	OpenStdin   bool
+
+	// Optional extras (zero values keep the bot/builder behaviour).
+	AddonKind string
+	// KeepImageEntrypoint passes Argv as the command and keeps the image's
+	// own entrypoint (add-on images initialise themselves through it).
+	KeepImageEntrypoint bool
+	Mounts              []Mount  // extra bind mounts
+	ExtraTmpfs          []string // extra in-memory paths
+	NetworkAliases      []string // host names on Network (user-defined networks only)
+	// Networks are joined after create, before start (the bot's private
+	// add-on network).
+	Networks []string
+	Health   []string // health-check command (exec form)
+}
+
+// Mount is a bind mount of a host directory.
+type Mount struct {
+	Source, Target string
 }
 
 // PortBinding publishes one container port on the host.
@@ -115,6 +139,7 @@ type ContainerInfo struct {
 	OOMKilled  bool
 	StartedAt  time.Time
 	FinishedAt time.Time
+	Health     string // "", starting, healthy or unhealthy
 }
 
 // Role returns the container's role label.
@@ -168,6 +193,19 @@ type Docker interface {
 	// the container stops or ctx ends.
 	Follow(ctx context.Context, id string, w io.Writer) error
 	Events(ctx context.Context) (<-chan Event, <-chan error)
+}
+
+// Networker manages the private per-bot networks that connect a bot to its
+// add-ons. It is optional: a Docker implementation without it cannot run
+// add-ons.
+type Networker interface {
+	// EnsureNetwork creates an internal (no outbound access) bridge network
+	// with the given labels unless it exists.
+	EnsureNetwork(ctx context.Context, name string, labels map[string]string) error
+	// ConnectNetwork attaches a created container to a network.
+	ConnectNetwork(ctx context.Context, network, containerID string) error
+	// RemoveNetwork deletes a network; a missing one is not an error.
+	RemoveNetwork(ctx context.Context, name string) error
 }
 
 // BuildRecorder records build stages as durable operations with retained

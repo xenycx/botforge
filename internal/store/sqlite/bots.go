@@ -13,7 +13,8 @@ const botCols = `id, owner_id, node_id, name, runtime, image_ref, argv_json, mem
 	entrypoint_json, source_type, template_id, network_enabled, bandwidth_kbps,
 	restart_policy, restart_max_attempts, restart_backoff_initial_ms, restart_backoff_max_ms, auto_backup,
 	restart_count, next_retry_at_ms, state_reason, last_started_at_ms,
-	discord_user_id, discord_username, discord_avatar_url, COALESCE(workspace_id, '')`
+	discord_user_id, discord_username, discord_avatar_url, COALESCE(workspace_id, ''), COALESCE(build_command, ''),
+	COALESCE(logo_updated_at_ms, 0)`
 
 func scanBot(row interface{ Scan(...any) error }) (domain.Bot, error) {
 	var b domain.Bot
@@ -26,7 +27,8 @@ func scanBot(row interface{ Scan(...any) error }) (domain.Bot, error) {
 		&entry, &b.SourceType, &b.TemplateID, &netEnabled, &b.BandwidthKbps,
 		&b.RestartPolicy, &b.RestartMaxAttempts, &b.RestartBackoffInitialMS, &b.RestartBackoffMaxMS, &autoBackup,
 		&b.RestartCount, &b.NextRetryAtMS, &b.StateReason, &b.LastStartedAtMS,
-		&b.DiscordUserID, &b.DiscordUsername, &b.DiscordAvatarURL, &b.WorkspaceID)
+		&b.DiscordUserID, &b.DiscordUsername, &b.DiscordAvatarURL, &b.WorkspaceID, &b.BuildCommand,
+		&b.LogoUpdatedMS)
 	if err != nil {
 		return b, mapErr(err)
 	}
@@ -89,14 +91,14 @@ func (db *DB) CreateBot(ctx context.Context, b domain.Bot) error {
 	_, err = db.ExecContext(ctx, `INSERT INTO bots (id, owner_id, node_id, name, runtime, image_ref, argv_json,
 		memory_bytes, nano_cpus, pids_limit, created_at_ms, updated_at_ms,
 		entrypoint_json, source_type, template_id, network_enabled, bandwidth_kbps,
-		restart_policy, restart_max_attempts, restart_backoff_initial_ms, restart_backoff_max_ms, workspace_id)
+		restart_policy, restart_max_attempts, restart_backoff_initial_ms, restart_backoff_max_ms, workspace_id, build_command)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,
-			COALESCE(NULLIF(?, ''), (SELECT id FROM workspaces WHERE owner_id = ?2 AND personal = 1)))`,
+			COALESCE(NULLIF(?, ''), (SELECT id FROM workspaces WHERE owner_id = ?2 AND personal = 1)), NULLIF(?, ''))`,
 		b.ID, b.OwnerID, b.NodeID, b.Name, b.Runtime, b.ImageRef, string(argv), b.MemoryBytes, b.NanoCPUs,
 		b.PidsLimit, b.CreatedAtMS, b.UpdatedAtMS,
 		entry, defaultStr(b.SourceType, "manual"), b.TemplateID, boolInt(!b.NetworkDisabled), b.BandwidthKbps,
 		defaultStr(b.RestartPolicy, domain.RestartOnFailure), defaultInt(b.RestartMaxAttempts, 5),
-		defaultInt(b.RestartBackoffInitialMS, 2000), defaultInt(b.RestartBackoffMaxMS, 300000), b.WorkspaceID)
+		defaultInt(b.RestartBackoffInitialMS, 2000), defaultInt(b.RestartBackoffMaxMS, 300000), b.WorkspaceID, b.BuildCommand)
 	return mapErr(err)
 }
 
@@ -106,7 +108,10 @@ func (db *DB) GetBot(ctx context.Context, id string) (domain.Bot, error) {
 	if err != nil {
 		return b, err
 	}
-	b.Ports, err = db.ListBotPorts(ctx, id)
+	if b.Ports, err = db.ListBotPorts(ctx, id); err != nil {
+		return b, err
+	}
+	b.Addons, err = db.ListBotAddons(ctx, id)
 	return b, err
 }
 
@@ -181,13 +186,13 @@ func (db *DB) UpdateBotConfig(ctx context.Context, b domain.Bot, nowMS int64) er
 	res, err := db.ExecContext(ctx, `UPDATE bots SET name = ?, runtime = ?, image_ref = ?, argv_json = ?, entrypoint_json = ?,
 		memory_bytes = ?, nano_cpus = ?, pids_limit = ?, network_enabled = ?, bandwidth_kbps = ?,
 		restart_policy = ?, restart_max_attempts = ?, restart_backoff_initial_ms = ?, restart_backoff_max_ms = ?,
-		auto_backup = ?,
+		auto_backup = ?, build_command = NULLIF(?, ''),
 		generation = generation + 1, updated_at_ms = ?
 		WHERE id = ? AND generation = ? AND `+stoppedPredicate,
 		b.Name, b.Runtime, b.ImageRef, string(argv), entry, b.MemoryBytes, b.NanoCPUs, b.PidsLimit,
 		boolInt(!b.NetworkDisabled), b.BandwidthKbps,
 		defaultStr(b.RestartPolicy, domain.RestartOnFailure), b.RestartMaxAttempts, b.RestartBackoffInitialMS, b.RestartBackoffMaxMS,
-		boolInt(!b.AutoBackupOff), nowMS, b.ID, b.Generation)
+		boolInt(!b.AutoBackupOff), b.BuildCommand, nowMS, b.ID, b.Generation)
 	if err != nil {
 		return mapErr(err)
 	}

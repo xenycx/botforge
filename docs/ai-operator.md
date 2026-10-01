@@ -162,6 +162,22 @@ decided. Startup, deployment, site publication, GitHub, user/access/key/MFA,
 domain, resource/network-policy, backup/restore, deletion and secret-reveal
 tools do not exist.
 
+## Repository analysis
+
+Outside the chat, **Analyze repository** in the new-bot flow can ask the
+default enabled provider (the one marked default, else the first enabled one
+with a key) for a deployment plan when *Refine with AI* is ticked. It is a
+single completion without tools, at temperature 0.1: the prompt holds the
+runtime and add-on catalog, the repository's file list (300 paths), detected
+variable names and about 60 KB of manifests, example configuration, entry
+files and README, plus the deterministic plan. Repository text is marked as
+untrusted data. The reply must be JSON; it is parsed, merged with required
+variables the detection found, and validated like any manual input (allowed
+start commands, known add-ons, valid variable names, no prefilled secrets,
+resource limits). Nothing is created or run until the person creates the bot.
+The request is logged with the provider, model and token counts; it is not
+stored as a conversation. Verified recipes for well-known bots skip the AI.
+
 ## Changes, diagnostics and recovery
 
 AI text changes are limited to 1 MiB per file and stored as compressed

@@ -8,6 +8,8 @@
 	import { toast } from '$lib/ui/toast.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
+	import LogoEditor from '$lib/components/LogoEditor.svelte';
+	import Icon from '$lib/components/ui/Icon.svelte';
 	import { creatable, loadWorkspaces, workspaceName } from '$lib/workspaces.svelte';
 
 	let { bot, stopped, onSaved }: { bot: Bot; stopped: boolean; onSaved: (b: Bot) => void } = $props();
@@ -28,6 +30,21 @@
 	$effect(() => {
 		loadWorkspaces();
 	});
+
+	let logoBusy = $state(false);
+	async function logo(method: 'PUT' | 'DELETE' | 'POST', body?: unknown) {
+		logoBusy = true;
+		try {
+			const path = method === 'POST' ? `/bots/${bot.id}/logo/discord` : `/bots/${bot.id}/logo`;
+			const b = await api<Bot>(method, path, body);
+			onSaved({ ...bot, logo_url: b.logo_url, custom_logo: b.custom_logo, discord_avatar_url: b.discord_avatar_url, discord_username: b.discord_username });
+			toast(method === 'POST' ? `Got the avatar of ${b.discord_username || 'the bot'} from Discord` : method === 'PUT' ? 'Logo saved' : 'Custom logo removed', 'success');
+		} catch (err) {
+			toast(err instanceof ApiError ? err.message : 'The logo could not be changed.', 'fail');
+		} finally {
+			logoBusy = false;
+		}
+	}
 
 	async function moveWorkspace(e: SubmitEvent) {
 		e.preventDefault();
@@ -141,6 +158,14 @@
 			{#if dirty}<button type="button" class="btn btn-quiet" onclick={() => (form = { ...base })}>Discard changes</button><span class="text-small text-warn">Unsaved changes</span>{/if}
 		</div>
 	</form>
+</SettingsSection>
+
+<SettingsSection title="Logo" description="Shown in the bot list, the sidebar and on the bot's public page. Without a custom logo the bot's Discord avatar is used: it arrives through the telemetry SDK, or you can get it now with the bot's token.">
+	<LogoEditor src={bot.logo_url} custom={bot.custom_logo} fallbackLabel={bot.name.slice(0, 2).toUpperCase()} busy={logoBusy}
+		onUpload={(image) => logo('PUT', { image })} onRemove={() => logo('DELETE')}>
+		<button type="button" class="btn btn-sm" disabled={logoBusy} onclick={() => logo('POST')} title="Uses the bot token stored in this bot's variables"><Icon name="discord" size={14} />Get avatar from Discord</button>
+	</LogoEditor>
+	{#if bot.discord_username}<p class="mt-2 text-small text-muted">Discord user: {bot.discord_username}</p>{/if}
 </SettingsSection>
 
 <SettingsSection title="Tags" description="Group bots on the Bots page, for example by team, server or environment. Everyone with access sees them.">

@@ -97,6 +97,22 @@ limits).
   downloads a tarball and unpacks it with the contained extractor. Repository
   build scripts run only inside the resource-limited build container, exactly as
   uploaded code does.
+* **Custom build commands** run as `sh -c` in the same build container (same
+  limits, network access, no bot variables). They add no privilege beyond the
+  package-manager install scripts that already run there, but a suggested
+  command (from repository analysis or the AI) should be reviewed before use.
+* **Add-ons** (PostgreSQL, Redis, MongoDB, MariaDB) run in their own containers
+  with the same defaults as bots (unprivileged container user, read-only root,
+  all capabilities dropped, `no-new-privileges`, memory/CPU/PID limits), on a
+  per-bot Docker network created with `Internal: true`. Verified on Docker
+  29.7.2: a container on that network could not resolve or reach the internet,
+  while the bot (default bridge plus the private network) reached both the
+  internet and its add-on by host name. Other bots are not attached to the
+  network and cannot reach it. Redis runs without a password; the network is
+  its only access control. The panel host (root-equivalent anyway) can reach
+  bridge addresses directly.
+* **Discord avatar lookup** sends the bot's own token from the panel to
+  `discord.com` only, on request.
 * **Java builds download Maven** into the workspace inside the build container,
   verified against a SHA-512 pinned in `runtimes/java.yaml`. Dependencies then
   come from Maven Central. Point `BOTPANEL_RUNTIMES_DIR` at your own recipe to

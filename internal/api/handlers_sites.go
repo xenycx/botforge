@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -40,6 +41,10 @@ type siteDTO struct {
 	RepoRoot        string  `json:"repo_root"`
 	CreatedAtMS     int64   `json:"created_at_ms"`
 	UpdatedAtMS     int64   `json:"updated_at_ms"`
+	// IconURL serves the custom logo, the release favicon or the bot's logo
+	// (404 when there is none); the version changes when any of them may have.
+	IconURL    string `json:"icon_url"`
+	CustomLogo bool   `json:"custom_logo"`
 }
 
 func (s *server) toSite(st domain.Site) siteDTO {
@@ -48,7 +53,15 @@ func (s *server) toSite(st domain.Site) siteDTO {
 		Mode: st.Mode, PageTitle: st.PageTitle, PageDescription: st.PageDescription, PageTheme: st.PageTheme, PageAccent: st.PageAccent,
 		PageHTML: st.PageHTML, PageCSS: st.PageCSS, WidgetsPublic: st.WidgetsPublic, CurrentRelease: st.CurrentRelease,
 		ReleaseBytes: st.ReleaseBytes, Disabled: st.Disabled, Domains: st.Domains, RepoFullName: st.RepoFullName, RepoBranch: st.RepoBranch,
-		RepoRoot: st.RepoRoot, CreatedAtMS: st.CreatedAtMS, UpdatedAtMS: st.UpdatedAtMS}
+		RepoRoot: st.RepoRoot, CreatedAtMS: st.CreatedAtMS, UpdatedAtMS: st.UpdatedAtMS, CustomLogo: st.LogoUpdatedMS > 0,
+		IconURL: fmt.Sprintf("/api/v1/sites/%s/icon?v=%d-%s", st.ID, st.LogoUpdatedMS, strOr(st.CurrentRelease))}
+}
+
+func strOr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (s *server) siteList(list []domain.Site) []siteDTO {

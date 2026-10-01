@@ -28,6 +28,7 @@ type Site struct {
 	RepoTokenUser   *string // whose GitHub token deploys the repository
 	CreatedAtMS     int64
 	UpdatedAtMS     int64
+	LogoUpdatedMS   int64 // when a custom logo was set (0 = none)
 
 	// Filled by listing queries.
 	OwnerEmail    string

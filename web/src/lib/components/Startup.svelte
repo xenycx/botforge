@@ -14,12 +14,13 @@
 	let runtime = $state(bot.runtime);
 	let command = $state(joinArgs(bot.argv));
 	let entrypoint = $state(joinArgs(bot.entrypoint));
+	let buildCommand = $state(bot.build_command ?? '');
 	let policy = $state(bot.restart_policy);
 	let maxAttempts = $state(bot.restart_max_attempts);
 	let backoffInit = $state(bot.restart_backoff_initial_ms / 1000);
 	let backoffMax = $state(bot.restart_backoff_max_ms / 1000);
 	let error = $state('');
-	const snapshot = () => JSON.stringify([runtime, command, entrypoint, policy, maxAttempts, backoffInit, backoffMax]);
+	const snapshot = () => JSON.stringify([runtime, command, entrypoint, buildCommand, policy, maxAttempts, backoffInit, backoffMax]);
 	let base = $state(snapshot());
 	const dirty = $derived(snapshot() !== base);
 
@@ -42,6 +43,7 @@
 		error = '';
 		const body: Record<string, unknown> = {
 			entrypoint: splitArgs(entrypoint),
+			build_command: buildCommand,
 			restart_policy: policy,
 			restart_max_attempts: maxAttempts,
 			restart_backoff_initial_ms: Math.round(backoffInit * 1000),
@@ -87,6 +89,15 @@
 				<span class="help">Overrides the container entrypoint; the start command above then becomes its arguments. Leave empty to run the command directly.</span>
 			</label>
 		</div>
+	</SettingsSection>
+
+	<SettingsSection title="Build" description="Runs before every start in a separate, resource-limited container with internet access but without the bot's variables. Files it writes into the workspace stay for the bot.">
+		<label class="block">
+			<span class="label">Custom build command <span class="font-normal text-muted">(optional)</span></span>
+			<textarea class="field min-h-28 font-mono text-[13px]" bind:value={buildCommand} disabled={!stopped} spellcheck="false" maxlength="4096"
+				placeholder={chosen?.has_build ? 'Leave empty to use the default build for ' + chosen.display_name : 'cd cmd/mybot && go build -o /workspace/app .'}></textarea>
+			<span class="help">Shell commands, one per line, run with <code class="font-mono">sh</code> in <code class="font-mono">/workspace</code>; the build stops at the first failing line. Leave empty to use the runtime's default (for example <code class="font-mono">npm ci</code> or installing <code class="font-mono">requirements.txt</code>).</span>
+		</label>
 	</SettingsSection>
 
 	<SettingsSection title="Auto-restart" description="What happens when the process exits. The delay doubles after every crash, up to the longest delay, and starts over after the bot runs stably for a minute.">

@@ -126,6 +126,18 @@ func validateEnvName(name string, system bool) error {
 	return nil
 }
 
+// MaxBuildCommand bounds a custom build command.
+const MaxBuildCommand = 4096
+
+// validateBuildCommand normalises a custom build command ("" = default).
+func validateBuildCommand(cmd string) (string, error) {
+	cmd = strings.TrimSpace(strings.ReplaceAll(cmd, "\r\n", "\n"))
+	if len(cmd) > MaxBuildCommand || strings.ContainsRune(cmd, 0) || !utf8.ValidString(cmd) {
+		return "", domain.Invalid(fmt.Sprintf("the build command must be at most %d bytes of text", MaxBuildCommand))
+	}
+	return cmd, nil
+}
+
 func validateEnvValue(v string) error {
 	if len(v) > maxEnvValueLen || strings.ContainsRune(v, 0) {
 		return domain.Invalid("environment value is too long or contains NUL")

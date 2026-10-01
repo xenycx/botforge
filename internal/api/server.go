@@ -368,9 +368,21 @@ func (s *server) routes(v1 fiber.Router) {
 		},
 	})
 	authed.Get("/templates", s.listTemplates)
+	// Lookups of other people's repositories spend the panel's (or the
+	// person's) GitHub API budget.
+	ghLimit := limiter.New(limiter.Config{
+		Max: 30, Expiration: time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string { return "gh:" + currentUser(c).ID },
+		LimitReached: func(c fiber.Ctx) error {
+			return fiber.NewError(fiber.StatusTooManyRequests, "too many repository lookups; try again shortly")
+		},
+	})
 	if s.deploy != nil {
 		authed.Get("/me/github/repos", s.githubRepos)
-		authed.Get("/me/github/branches", s.githubBranches)
+		authed.Get("/me/github/branches", ghLimit, s.githubBranches)
+		authed.Get("/github/lookup", ghLimit, s.githubLookup)
+		authed.Post("/github/analyze", ghLimit, s.analyzeGitHub)
+		authed.Get("/github/recipes", s.listRecipes)
 		authed.Get("/bots/:id/github", s.getGitHub)
 		authed.Put("/bots/:id/github", s.putGitHub)
 		authed.Delete("/bots/:id/github", s.deleteGitHub)
@@ -444,6 +456,9 @@ func (s *server) routes(v1 fiber.Router) {
 		authed.Get("/sites/:sid", s.getSite)
 		authed.Patch("/sites/:sid", s.patchSite)
 		authed.Delete("/sites/:sid", s.deleteSite)
+		authed.Get("/sites/:sid/icon", s.getSiteIcon)
+		authed.Put("/sites/:sid/logo", s.putSiteLogo)
+		authed.Delete("/sites/:sid/logo", s.deleteSiteLogo)
 		authed.Post("/sites/:sid/upload", s.uploadSite)
 		authed.Get("/sites/:sid/files", s.listFiles)
 		authed.Get("/sites/:sid/files/content", s.readFile)
@@ -526,6 +541,17 @@ func (s *server) routes(v1 fiber.Router) {
 		return b.Kill(c.Context(), currentUser(c), id)
 	}))
 	authed.Put("/bots/:id/ports", s.setPorts)
+	authed.Get("/bots/:id/logo", s.getBotLogo)
+	authed.Put("/bots/:id/logo", s.putBotLogo)
+	authed.Delete("/bots/:id/logo", s.deleteBotLogo)
+	authed.Post("/bots/:id/logo/discord", s.discordBotLogo)
+	authed.Get("/addons", s.listAddonKinds)
+	authed.Get("/bots/:id/addons", s.listBotAddons)
+	authed.Post("/bots/:id/addons", s.addBotAddon)
+	authed.Patch("/bots/:id/addons/:kind", s.patchBotAddon)
+	authed.Delete("/bots/:id/addons/:kind", s.deleteBotAddon)
+	authed.Post("/bots/:id/addons/:kind/reveal", s.revealBotAddon)
+	authed.Get("/bots/:id/addons/:kind/logs", s.botAddonLogs)
 	authed.Put("/bots/:id/tags", s.setTags)
 	authed.Put("/bots/:id/favorite", s.setFavorite)
 	if s.console != nil {

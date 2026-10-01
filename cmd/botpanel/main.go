@@ -41,6 +41,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"golang.org/x/term"
 
+	"botpanel/internal/addons"
 	"botpanel/internal/api"
 	"botpanel/internal/auth"
 	"botpanel/internal/backup"
@@ -564,13 +565,21 @@ func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 		if err != nil {
 			return fmt.Errorf("installation identity: %w", err)
 		}
+		// Add-on (database) data lives next to the database, outside every
+		// bot workspace.
+		addonRoot, err := filepath.Abs(filepath.Join(filepath.Dir(cfg.DBPath), "addons"))
+		if err != nil {
+			return fmt.Errorf("add-on data: %w", err)
+		}
+		addonData := addons.DataRoot{Dir: addonRoot}
 		rn, err := runner.New(runner.Deps{Store: db, Docker: dk, Env: botSvc, Workspaces: wsm, Catalog: catalog, Log: log, Bus: bus, Builds: ops},
 			runner.Options{NodeID: domain.LocalNodeID, InstallID: installID, User: cfg.ContainerUser, WorkspaceOwner: cfg.WorkspaceOwner, Network: cfg.ContainerNetwork,
-				Workers: cfg.RunnerWorkers, BuildTimeout: cfg.BuildTimeout, MaxBuilds: cfg.MaxBuilds})
+				Workers: cfg.RunnerWorkers, BuildTimeout: cfg.BuildTimeout, MaxBuilds: cfg.MaxBuilds, AddonData: addonData})
 		if err != nil {
 			return fmt.Errorf("runner: %w", err)
 		}
 		botSvc.Notifier, botSvc.Purger, botSvc.Killer = rn, rn, rn
+		botSvc.AddonData, botSvc.AddonRuntime = addonData, addonRuntime{rn}
 		checks = append(checks, api.Check{Name: "docker", Fn: rn.Check})
 		runnerReady = rn.Check
 		runnerStatus = func(context.Context) (runner.Status, bool) { return rn.Status(), true }
@@ -689,6 +698,7 @@ func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 	}
 	aiSvc := &service.AIService{Store: db, Keys: keys, Bots: botSvc, Sites: sitesSvc, Files: wsm, Ops: ops, Audit: audit, Diagnostic: aiDiagnostic, Logs: aiLogs, Log: log}
 	aiSvc.Start(ctx)
+	deploySvc.AI = aiSvc
 	app := api.New(api.Deps{Diagnostics: diagnostics, Log: log, Deploy: deploySvc, Backups: backupSvc, Stats: statsSrc, SFTP: sftpInfo, Analytics: analytics, PublicURL: cfg.PublicURL, DB: db, UI: webui.FS(), Auth: authSvc, Bots: botSvc, OAuth: oauthSvc,
 		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, MetricsToken: cfg.MetricsToken, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,
 		Console: consoleSvc, BaseCtx: ctx, RunnerReady: runnerReady, Ops: ops, Audit: audit, Schedules: scheduler,
@@ -847,4 +857,23 @@ func doctorCmd() error {
 		return fmt.Errorf("%d check(s) failed", fail)
 	}
 	return nil
+}
+
+// addonRuntime adapts the runner's add-on observations to the service.
+type addonRuntime struct{ rn *runner.Runner }
+
+func (a addonRuntime) AddonStates(ctx context.Context, botID string) (map[string]service.AddonState, error) {
+	st, err := a.rn.AddonStates(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]service.AddonState, len(st))
+	for k, v := range st {
+		out[k] = service.AddonState{State: v.State, Health: v.Health, ExitCode: v.ExitCode}
+	}
+	return out, nil
+}
+
+func (a addonRuntime) AddonLogs(ctx context.Context, botID, kind string, lines int) (string, error) {
+	return a.rn.AddonLogs(ctx, botID, kind, lines)
 }

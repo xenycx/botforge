@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"botpanel/internal/addons"
 	"botpanel/internal/domain"
 	"botpanel/internal/events"
 	"botpanel/internal/filesystem"
@@ -51,6 +53,9 @@ type BotService struct {
 	BeforeDelete func(ctx context.Context, botID string) // optional best-effort cleanup (e.g. remove the GitHub webhook)
 	Files        *filesystem.Manager                     // optional: needed to seed templates
 	Coord        *Coordinator                            // per-bot operation reservations (nil = none)
+	AddonData    AddonData                               // nil: add-ons unavailable
+	AddonRuntime AddonRuntime                            // optional: add-on state and logs
+	DiscordAPI   string                                  // Discord REST base (tests); "" = discord.com
 }
 
 // FilesBlocked reports (as a BusyError) whether a deployment or restore is
@@ -77,6 +82,10 @@ type CreateBotInput struct {
 	// Env are initial variables (e.g. the template's DISCORD_TOKEN), sealed
 	// like any other; invalid names or values reject the whole request.
 	Env map[string]string
+	// BuildCommand optionally replaces the runtime's build step.
+	BuildCommand string
+	// Addons are attached at creation (databases, caches).
+	Addons []AddonInput
 }
 
 // UpdateBotInput is a partial configuration change; nil fields are unchanged.
@@ -98,6 +107,8 @@ type UpdateBotInput struct {
 	RestartMaxAttempts      *int64
 	RestartBackoffInitialMS *int64
 	RestartBackoffMaxMS     *int64
+
+	BuildCommand *string // "" clears it
 }
 
 // EnvView is the masked view of a variable.
@@ -238,7 +249,15 @@ func (s *BotService) Create(ctx context.Context, actor domain.User, in CreateBot
 	if err := s.Limits.validateResources(rt, mem, cpu, pids); err != nil {
 		return domain.Bot{}, err
 	}
-	if err := s.checkUserBudget(ctx, actor, 1, mem); err != nil {
+	build, err := validateBuildCommand(in.BuildCommand)
+	if err != nil {
+		return domain.Bot{}, err
+	}
+	addonMem, err := s.validateAddonInputs(in.Addons)
+	if err != nil {
+		return domain.Bot{}, err
+	}
+	if err := s.checkUserBudget(ctx, actor, 1, mem+addonMem); err != nil {
 		return domain.Bot{}, err
 	}
 	wsID, err := s.creatableWorkspace(ctx, actor, in.WorkspaceID)
@@ -259,7 +278,7 @@ func (s *BotService) Create(ctx context.Context, actor domain.User, in CreateBot
 		ID: uuid.NewString(), OwnerID: actor.ID, WorkspaceID: wsID, NodeID: nodeID, Name: name, Runtime: rt.ID, ImageRef: rt.ImageRef(),
 		Argv: argv, MemoryBytes: mem, NanoCPUs: cpu, PidsLimit: pids,
 		DesiredState: domain.DesiredStopped, ObservedState: "stopped", CreatedAtMS: now, UpdatedAtMS: now,
-		SourceType: in.SourceType, TemplateID: in.TemplateID, RestartPolicy: domain.RestartOnFailure,
+		SourceType: in.SourceType, TemplateID: in.TemplateID, RestartPolicy: domain.RestartOnFailure, BuildCommand: build,
 	}
 	// Workspace first: a leftover directory is harmless and reconcilable, whereas
 	// a row without a workspace would be a broken bot.
@@ -286,7 +305,56 @@ func (s *BotService) Create(ctx context.Context, actor domain.User, in CreateBot
 			return domain.Bot{}, err
 		}
 	}
+	for _, a := range in.Addons {
+		cur, err := s.Store.GetBot(ctx, b.ID)
+		if err == nil {
+			_, _, err = s.addAddon(ctx, cur, a, false) // budget checked above
+		}
+		if err != nil {
+			_ = s.Store.MarkBotDeleted(ctx, b.ID, s.now())
+			_ = s.Workspaces.Remove(b.ID)
+			_ = s.Store.DeleteBotRow(ctx, b.ID)
+			return domain.Bot{}, err
+		}
+	}
+	if len(in.Addons) > 0 || len(in.Env) > 0 {
+		return s.Store.GetBot(ctx, b.ID)
+	}
 	return b, nil
+}
+
+// validateAddonInputs checks add-ons requested at creation and returns their
+// total memory.
+func (s *BotService) validateAddonInputs(in []AddonInput) (int64, error) {
+	if len(in) == 0 {
+		return 0, nil
+	}
+	if err := s.addonsEnabled(); err != nil {
+		return 0, err
+	}
+	if len(in) > maxAddonsPerBot {
+		return 0, domain.Invalid(fmt.Sprintf("a bot can have at most %d add-ons", maxAddonsPerBot))
+	}
+	seen := map[string]bool{}
+	var total int64
+	for i, a := range in {
+		k, ok := addons.Get(strings.ToLower(strings.TrimSpace(a.Kind)))
+		if !ok {
+			return 0, domain.Invalid(fmt.Sprintf("unknown add-on %q", a.Kind))
+		}
+		if seen[k.ID] {
+			return 0, domain.Invalid(k.DisplayName + " is listed twice")
+		}
+		seen[k.ID] = true
+		if a.MemoryBytes == 0 {
+			in[i].MemoryBytes = k.DefaultMemory
+		}
+		if err := k.ValidateMemory(in[i].MemoryBytes); err != nil {
+			return 0, domain.Invalid(err.Error())
+		}
+		total += in[i].MemoryBytes
+	}
+	return total, nil
 }
 
 func (s *BotService) Get(ctx context.Context, actor domain.User, id string) (domain.Bot, error) {
@@ -395,6 +463,11 @@ func (s *BotService) Update(ctx context.Context, actor domain.User, id string, i
 	}
 	if err := applyRestart(&b, in); err != nil {
 		return domain.Bot{}, err
+	}
+	if in.BuildCommand != nil {
+		if b.BuildCommand, err = validateBuildCommand(*in.BuildCommand); err != nil {
+			return domain.Bot{}, err
+		}
 	}
 	if err := s.Store.UpdateBotConfig(ctx, b, s.now()); err != nil {
 		return domain.Bot{}, err
@@ -537,9 +610,12 @@ func (s *BotService) ListEnv(ctx context.Context, actor domain.User, id string) 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]EnvView, len(rows))
-	for i, r := range rows {
-		out[i] = EnvView{r.Name, r.UpdatedAtMS}
+	out := make([]EnvView, 0, len(rows))
+	for _, r := range rows {
+		if strings.HasPrefix(r.Name, "BOTPANEL_ADDON_") {
+			continue // add-on passwords are shown on the Add-ons tab
+		}
+		out = append(out, EnvView{r.Name, r.UpdatedAtMS})
 	}
 	return out, nil
 }
@@ -605,6 +681,9 @@ func (s *BotService) putEnv(ctx context.Context, b domain.Bot, vars map[string]s
 func (s *BotService) DeleteEnv(ctx context.Context, actor domain.User, id, name string) error {
 	if _, err := s.loadPerm(ctx, actor, id, domain.PermManageEnv, false); err != nil {
 		return err
+	}
+	if strings.HasPrefix(name, "BOTPANEL_ADDON_") {
+		return domain.Invalid("this password belongs to an add-on; remove the add-on instead")
 	}
 	if err := s.Coord.Blocked(id); err != nil {
 		return err

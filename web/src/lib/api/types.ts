@@ -32,6 +32,13 @@ export type Bot = {
 	bandwidth_kbps: number | null;
 	ports: Port[];
 	auto_backup: boolean;
+	/** Custom logo, else the Discord avatar ("" = neither). */
+	logo_url: string;
+	custom_logo: boolean;
+	/** Custom build script; "" = the runtime's default build. */
+	build_command: string;
+	/** Attached add-on kinds (bot detail responses). */
+	addons?: string[];
 	restart_policy: 'never' | 'on_failure';
 	restart_max_attempts: number;
 	restart_backoff_initial_ms: number;
@@ -169,6 +176,8 @@ export type RepoLink = {
 	last_deployed_at_ms: number;
 	last_error: string;
 	deploying: boolean;
+	/** Auto-deploy checks the branch periodically (no webhook). */
+	polling?: boolean;
 };
 export type Backup = {
 	id: string;
@@ -343,6 +352,9 @@ export type Site = {
 	repo_root: string;
 	created_at_ms: number;
 	updated_at_ms: number;
+	/** Custom logo, release favicon or bot logo; 404 when none. */
+	icon_url: string;
+	custom_logo: boolean;
 };
 export type SiteDomain = {
 	domain: string;
@@ -398,3 +410,70 @@ export type SiteBaseDomain = {
 	record_target: string;
 	created_at_ms: number;
 };
+
+export type AddonKind = {
+	id: string;
+	display_name: string;
+	description: string;
+	image: string;
+	port: number;
+	variables: string[];
+	default_memory_bytes: number;
+	min_memory_bytes: number;
+	password: boolean;
+};
+export type BotAddon = {
+	kind: string;
+	display_name: string;
+	description: string;
+	image: string;
+	host: string;
+	port: number;
+	memory_bytes: number;
+	variables: string[];
+	data_bytes: number;
+	created_at_ms: number;
+	status: { state: string; health: string; exit_code: number };
+};
+export type PlanEnv = { name: string; description: string; required: boolean; secret: boolean; value: string };
+export type Plan = {
+	source: 'recipe' | 'detected' | 'ai';
+	confidence: 'high' | 'medium' | 'low';
+	summary: string;
+	runtime: string;
+	argv: string[] | null;
+	build_command: string;
+	env: PlanEnv[];
+	addons: string[];
+	memory_bytes: number;
+	nano_cpus: number;
+	pids_limit: number;
+	ports: number[] | null;
+	setup: string[] | null;
+	notes: string[] | null;
+	evidence: string[] | null;
+};
+export type RepoInfo = {
+	full_name: string;
+	private: boolean;
+	default_branch: string;
+	html_url: string;
+	description?: string;
+	language?: string;
+	stargazers_count?: number;
+	archived?: boolean;
+	pushed_at?: string;
+	license?: { spdx_id: string } | null;
+};
+export type RepoLookup = { repo: RepoInfo; branch: string; root_dir: string; branches: string[]; connected: boolean };
+export type Analysis = {
+	repo: RepoInfo;
+	branch: string;
+	root_dir: string;
+	sha: string;
+	plan: Plan;
+	ai: { available: boolean; used: boolean; model?: string; error?: string };
+	files: number;
+	truncated: boolean;
+};
+export type Recipe = { repo: string; branch: string; name: string; description: string; language: string; plan: Plan };

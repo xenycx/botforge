@@ -66,6 +66,8 @@ func (s *server) me(c fiber.Ctx) error {
 			"deploy": s.deploy != nil && s.oauth.Enabled("github"), "backups": s.backups != nil, "analytics": s.analytics != nil, "sftp": s.sftp != nil,
 			"operations": s.ops != nil, "oauth": s.oauth.AnyEnabled(), "schedules": s.schedules != nil, "mfa": s.mfa != nil, "automation": s.tokens != nil, "health": s.health != nil,
 			"sites": s.sites.Enabled(), "workspaces": true, "ai": s.ai != nil, "mail": s.mail.Enabled(c.Context()),
+			// Public repositories deploy without GitHub sign-in; add-ons need the Docker runner.
+			"public_repos": s.deploy != nil, "addons": s.bots.AddonData != nil,
 		}, "email_alerts": s.emailAlerts(c), "email_news": s.emailNews(c)})
 }
 

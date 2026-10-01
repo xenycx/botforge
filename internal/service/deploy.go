@@ -40,14 +40,20 @@ type DeployService struct {
 	Log       *slog.Logger
 	Now       func() time.Time
 	Ops       *Operations // optional: deployment history
+	AI        *AIService  // optional: refines repository analysis
 	// MinFreeDisk is the free space a deployment needs to start.
 	MinFreeDisk int64
+	// PollInterval is how often auto-deploy sources without a webhook (public
+	// repositories of other people, or a webhook GitHub refused) are checked
+	// for new commits. 0 = 5 minutes; negative disables polling.
+	PollInterval time.Duration
 
 	baseCtx context.Context
 	sem     chan struct{}
 	mu      sync.Mutex
 	jobs    map[string]*jobState
 	seen    map[string]time.Time // recent webhook delivery ids
+	polled  map[string]string    // bot id -> branch head already queued by polling
 	wg      sync.WaitGroup
 }
 
@@ -55,6 +61,9 @@ type DeployService struct {
 func (d *DeployService) Start(ctx context.Context) {
 	d.baseCtx = ctx
 	d.sem = make(chan struct{}, 2)
+	if d.PollInterval >= 0 {
+		go d.pollLoop(ctx)
+	}
 }
 
 // Wait blocks until running jobs finish.
@@ -107,10 +116,23 @@ func (d *DeployService) token(ctx context.Context, userID string) (string, error
 	return t, err
 }
 
+// optToken returns the user's GitHub token, or "" when they have not
+// connected GitHub (public repositories work without one, with GitHub's
+// lower anonymous rate limit).
+func (d *DeployService) optToken(ctx context.Context, userID string) (string, error) {
+	t, err := d.OAuth.GitHubToken(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return "", nil
+	}
+	return t, err
+}
+
 func ghError(err error) error {
 	switch {
 	case errors.Is(err, github.ErrNotFound), errors.Is(err, github.ErrUnauthorized), errors.Is(err, github.ErrInvalid),
 		errors.Is(err, github.ErrConflict):
+		return domain.Invalid(err.Error())
+	case errors.Is(err, github.ErrRateLimited):
 		return domain.Invalid(err.Error())
 	}
 	return err
@@ -129,17 +151,55 @@ func (d *DeployService) Repos(ctx context.Context, actor domain.User) ([]github.
 	return r, ghError(err)
 }
 
-// Branches lists a repository's branches.
+// Branches lists a repository's branches (public repositories work without
+// a GitHub connection).
 func (d *DeployService) Branches(ctx context.Context, actor domain.User, fullName string) ([]string, error) {
-	if err := d.ready(); err != nil {
-		return nil, err
-	}
-	tok, err := d.token(ctx, actor.ID)
+	tok, err := d.optToken(ctx, actor.ID)
 	if err != nil {
 		return nil, err
 	}
 	b, err := d.GH.Branches(ctx, tok, fullName)
 	return b, ghError(err)
+}
+
+// RepoLookup is a repository a person pasted, resolved for the creation flow.
+type RepoLookup struct {
+	Repo     github.Repo `json:"repo"`
+	Branch   string      `json:"branch"`   // from the pasted address, else the default branch
+	RootDir  string      `json:"root_dir"` // from the pasted address
+	Branches []string    `json:"branches"`
+	// Connected reports whether the person's own GitHub token was used (and
+	// would be used for deployments); otherwise the repository is read
+	// anonymously and must stay public.
+	Connected bool `json:"connected"`
+}
+
+// Lookup resolves any GitHub address or owner/name to a repository, with or
+// without a GitHub connection.
+func (d *DeployService) Lookup(ctx context.Context, actor domain.User, ref string) (RepoLookup, error) {
+	r, err := github.ParseRepoRef(ref)
+	if err != nil {
+		return RepoLookup{}, domain.Invalid("enter a GitHub repository such as owner/name or https://github.com/owner/name")
+	}
+	tok, err := d.optToken(ctx, actor.ID)
+	if err != nil {
+		return RepoLookup{}, err
+	}
+	repo, err := d.GH.GetRepo(ctx, tok, r.FullName)
+	if err != nil {
+		if errors.Is(err, github.ErrNotFound) && tok == "" {
+			return RepoLookup{}, domain.Invalid("repository not found; private repositories need a GitHub connection (Settings → Connected accounts)")
+		}
+		return RepoLookup{}, ghError(err)
+	}
+	out := RepoLookup{Repo: repo, Branch: r.Branch, RootDir: r.Path, Connected: tok != ""}
+	if out.Branch == "" {
+		out.Branch = repo.DefaultBranch
+	}
+	if out.Branches, err = d.GH.Branches(ctx, tok, repo.FullName); err != nil {
+		out.Branches = []string{out.Branch} // listing is a convenience
+	}
+	return out, nil
 }
 
 // ---- configuration ----
@@ -168,6 +228,9 @@ type RepoView struct {
 	LastDeployedMS int64
 	LastError      string
 	Deploying      bool
+	// Polling: auto-deploy works by checking the branch periodically because
+	// no webhook could be installed.
+	Polling bool
 }
 
 func cleanRoot(s string) (string, error) {
@@ -187,7 +250,8 @@ func cleanRoot(s string) (string, error) {
 
 func (d *DeployService) view(r domain.GitHubRepo) RepoView {
 	v := RepoView{FullName: r.FullName, Branch: r.Branch, RootDir: r.RootDir, Private: r.Private, AutoDeploy: r.AutoDeploy,
-		HookCreated: r.HookID != nil, WebhookURL: d.WebhookURL(), Deploying: d.isRunning(r.BotID)}
+		HookCreated: r.HookID != nil, WebhookURL: d.WebhookURL(), Deploying: d.isRunning(r.BotID),
+		Polling: r.AutoDeploy && r.HookID == nil && d.PollInterval >= 0}
 	if r.LastSHA != nil {
 		v.LastSHA = *r.LastSHA
 	}
@@ -222,9 +286,6 @@ func (d *DeployService) Get(ctx context.Context, actor domain.User, botID string
 // Configure links (or re-links) a bot to a repository, using the acting user's
 // GitHub token, and creates or removes the push webhook according to AutoDeploy.
 func (d *DeployService) Configure(ctx context.Context, actor domain.User, botID string, in ConfigureInput) (RepoView, error) {
-	if err := d.ready(); err != nil {
-		return RepoView{}, err
-	}
 	if _, err := d.Bots.Authorize(ctx, actor, botID, domain.PermFullAdmin); err != nil {
 		return RepoView{}, err
 	}
@@ -232,7 +293,7 @@ func (d *DeployService) Configure(ctx context.Context, actor domain.User, botID 
 }
 
 func (d *DeployService) configure(ctx context.Context, actor domain.User, botID string, in ConfigureInput) (RepoView, error) {
-	if !github.FullNameRe.MatchString(in.FullName) {
+	if !github.ValidFullName(in.FullName) {
 		return RepoView{}, domain.Invalid("repository must look like owner/name")
 	}
 	if !github.ValidBranch(in.Branch) {
@@ -242,15 +303,20 @@ func (d *DeployService) configure(ctx context.Context, actor domain.User, botID 
 	if err != nil {
 		return RepoView{}, err
 	}
-	if in.AutoDeploy && d.publicURL() == "" {
+	// Without a public address (or a GitHub token) GitHub cannot deliver
+	// webhooks: auto-deploy then polls the branch instead.
+	if in.AutoDeploy && d.publicURL() == "" && d.PollInterval < 0 {
 		return RepoView{}, domain.Invalid("auto-deploy needs BOTPANEL_PUBLIC_URL to be configured so GitHub can reach the panel")
 	}
-	tok, err := d.token(ctx, actor.ID)
+	tok, err := d.optToken(ctx, actor.ID)
 	if err != nil {
 		return RepoView{}, err
 	}
 	repo, err := d.GH.GetRepo(ctx, tok, in.FullName)
 	if err != nil {
+		if errors.Is(err, github.ErrNotFound) && tok == "" {
+			return RepoView{}, domain.Invalid("repository not found; private repositories need a GitHub connection (Settings → Connected accounts)")
+		}
 		return RepoView{}, ghError(err)
 	}
 	if _, err := d.GH.BranchSHA(ctx, tok, in.FullName, in.Branch); err != nil {
@@ -299,17 +365,22 @@ func (d *DeployService) configure(ctx context.Context, actor domain.User, botID 
 		return RepoView{}, err
 	}
 
-	if in.AutoDeploy && row.HookID == nil {
+	// A webhook needs a token that administers the repository and an address
+	// GitHub can reach; anything else is polled.
+	if in.AutoDeploy && row.HookID == nil && tok != "" && d.publicURL() != "" {
 		secret, err := d.secret(row)
 		if err != nil {
 			return RepoView{}, err
 		}
 		id, err := d.GH.CreateHook(ctx, tok, repo.FullName, d.WebhookURL(), secret)
 		if err != nil {
-			// Not fatal: the user can add the webhook by hand with the values shown.
+			// Not fatal: the branch is polled, and the owner of the repository
+			// can still add the webhook by hand with the values shown.
 			d.warn("create webhook", err)
 			v := d.view(row)
-			v.Secret = secret
+			if !repo.Private || d.PollInterval < 0 {
+				v.Secret = secret
+			}
 			return v, nil
 		}
 		row.HookID = &id
@@ -319,7 +390,7 @@ func (d *DeployService) configure(ctx context.Context, actor domain.User, botID 
 		}
 	}
 	v := d.view(row)
-	if secretPlain != "" && in.AutoDeploy && row.HookID == nil {
+	if secretPlain != "" && in.AutoDeploy && row.HookID == nil && tok != "" && d.publicURL() != "" {
 		v.Secret = secretPlain
 	}
 	return v, nil
@@ -361,10 +432,8 @@ func (d *DeployService) BeforeBotDelete(ctx context.Context, botID string) { d.r
 
 // CreateFromGitHub creates a bot and links it to a repository; the first
 // deploy runs in the background. If linking fails the bot is deleted again.
-func (d *DeployService) CreateFromGitHub(ctx context.Context, actor domain.User, in CreateBotInput, gh ConfigureInput) (domain.Bot, RepoView, error) {
-	if err := d.ready(); err != nil {
-		return domain.Bot{}, RepoView{}, err
-	}
+// With startAfter, the bot is started once the first deployment succeeds.
+func (d *DeployService) CreateFromGitHub(ctx context.Context, actor domain.User, in CreateBotInput, gh ConfigureInput, startAfter bool) (domain.Bot, RepoView, error) {
 	in.SourceType, in.TemplateID = "github", nil
 	b, err := d.Bots.Create(ctx, actor, in)
 	if err != nil {
@@ -375,7 +444,7 @@ func (d *DeployService) CreateFromGitHub(ctx context.Context, actor domain.User,
 		_ = d.Bots.Delete(ctx, actor, b.ID)
 		return domain.Bot{}, RepoView{}, err
 	}
-	d.enqueue(b.ID, DeployRequest{Trigger: "initial", ActorID: &actor.ID})
+	d.enqueue(b.ID, DeployRequest{Trigger: "initial", ActorID: &actor.ID, StartAfter: startAfter && d.Bots.Notifier != nil})
 	return b, v, nil
 }
 
@@ -386,6 +455,9 @@ type DeployRequest struct {
 	Trigger string // manual | push | initial | api
 	ActorID *string
 	SHA     string // a specific commit (redeploy/rollback)
+	// StartAfter starts a stopped bot once this deployment succeeds (the
+	// first deployment of a new bot).
+	StartAfter bool
 }
 
 // Deploy starts a deployment of the configured branch (or of req.SHA) in the
@@ -396,9 +468,6 @@ func (d *DeployService) Deploy(ctx context.Context, actor domain.User, botID str
 
 // DeployAs is Deploy with an explicit trigger (manual, schedule, api).
 func (d *DeployService) DeployAs(ctx context.Context, actor domain.User, botID, sha, trigger string) error {
-	if err := d.ready(); err != nil {
-		return err
-	}
 	if _, err := d.Bots.Authorize(ctx, actor, botID, domain.PermEditFiles); err != nil {
 		return err
 	}
@@ -424,9 +493,6 @@ func (d *DeployService) DeployAs(ctx context.Context, actor domain.User, botID, 
 // Preview compares the deployed commit with the branch head, so users can
 // see what a deployment would change before starting it.
 func (d *DeployService) Preview(ctx context.Context, actor domain.User, botID string) (github.Comparison, error) {
-	if err := d.ready(); err != nil {
-		return github.Comparison{}, err
-	}
 	if _, err := d.Bots.Authorize(ctx, actor, botID, domain.PermEditFiles); err != nil {
 		return github.Comparison{}, err
 	}
@@ -557,7 +623,7 @@ func (d *DeployService) run(base context.Context, botID string, req DeployReques
 	// A running bot restarts on the new code (this also re-runs its build
 	// step). The condition is evaluated atomically against CURRENT intent, so
 	// a Stop that arrived during the download is never undone.
-	restarted := false
+	restarted, started := false, false
 	if d.Bots.Notifier != nil {
 		d.Ops.Stage(fctx, op, "Restarting")
 		if nb, changed, err := d.store().RestartIfRunning(fctx, botID, d.now().UnixMilli()); err == nil && changed {
@@ -565,13 +631,27 @@ func (d *DeployService) run(base context.Context, botID string, req DeployReques
 			d.Bots.Bus.Publish(events.Status{BotID: botID, DesiredState: nb.DesiredState, ObservedState: nb.ObservedState,
 				Generation: nb.Generation, ObservedGeneration: nb.ObservedGeneration})
 			d.Bots.Notifier.Notify(botID)
+		} else if err == nil && req.StartAfter {
+			// The first deployment of a new bot: start it now that its files exist.
+			nb, changed, err := d.store().SetDesiredWithin(fctx, botID, domain.DesiredRunning, false, d.now().UnixMilli(), d.Bots.Limits.NodeMemoryBytes)
+			if err != nil {
+				d.warn("start after the first deployment", err)
+			} else if changed {
+				started = true
+				d.Bots.Bus.Publish(events.Status{BotID: botID, DesiredState: nb.DesiredState, ObservedState: nb.ObservedState,
+					Generation: nb.Generation, ObservedGeneration: nb.ObservedGeneration})
+				d.Bots.Notifier.Notify(botID)
+			}
 		}
 	}
 	msg := fmt.Sprintf("Deployed %s (%d files)", sha[:7], n)
 	if restarted {
 		msg += "; the bot is restarting on the new code"
 	}
-	d.Ops.Finish(fctx, op, domain.OpSucceeded, "", msg, map[string]any{"files": n, "sha": sha, "restarted": restarted})
+	if started {
+		msg += "; the bot is starting"
+	}
+	d.Ops.Finish(fctx, op, domain.OpSucceeded, "", msg, map[string]any{"files": n, "sha": sha, "restarted": restarted, "started": started})
 	if d.Alerts.Wants(fctx, botID, "deploy") {
 		d.Alerts.Send(fctx, bot.OwnerID, "✅ Deployed "+bot.Name,
 			fmt.Sprintf("%s · %s · %d files (%s)", label, sha[:7], n, req.Trigger))
@@ -707,7 +787,7 @@ func (d *DeployService) HandleWebhook(ctx context.Context, event, delivery, sign
 			FullName string `json:"full_name"`
 		} `json:"repository"`
 	}
-	if json.Unmarshal(body, &p) != nil || !github.FullNameRe.MatchString(p.Repository.FullName) {
+	if json.Unmarshal(body, &p) != nil || !github.ValidFullName(p.Repository.FullName) {
 		return "", ErrBadSignature
 	}
 	cands, err := d.store().ListAutoDeployRepos(ctx, p.Repository.FullName)
@@ -773,4 +853,76 @@ func (d *DeployService) duplicate(id string) bool {
 	}
 	d.seen[id] = now
 	return false
+}
+
+// ---- polling ----
+
+func (d *DeployService) pollEvery() time.Duration {
+	if d.PollInterval > 0 {
+		return d.PollInterval
+	}
+	return 5 * time.Minute
+}
+
+// pollLoop checks auto-deploy sources that have no webhook for new commits.
+func (d *DeployService) pollLoop(ctx context.Context) {
+	t := time.NewTicker(d.pollEvery())
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			d.PollOnce(ctx)
+		}
+	}
+}
+
+// PollOnce checks every polled source once and queues a deployment for each
+// branch whose head moved. A head is queued once, so a failing commit is not
+// retried every interval.
+func (d *DeployService) PollOnce(ctx context.Context) int {
+	repos, err := d.store().ListPollingRepos(ctx, 500)
+	if err != nil {
+		d.warn("list polled repositories", err)
+		return 0
+	}
+	queued := 0
+	for _, r := range repos {
+		if ctx.Err() != nil {
+			return queued
+		}
+		if d.isRunning(r.BotID) {
+			continue // a deployment is already fetching the branch head
+		}
+		tok, err := d.OAuth.GitHubToken(ctx, r.TokenUserID)
+		if err != nil {
+			if r.Private || !errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			tok = ""
+		}
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		head, err := d.GH.BranchSHA(cctx, tok, r.FullName, r.Branch)
+		cancel()
+		if err != nil {
+			if errors.Is(err, github.ErrRateLimited) {
+				return queued // try again next interval
+			}
+			continue
+		}
+		d.mu.Lock()
+		if d.polled == nil {
+			d.polled = map[string]string{}
+		}
+		seen := d.polled[r.BotID] == head
+		d.polled[r.BotID] = head
+		d.mu.Unlock()
+		if seen || (r.LastSHA != nil && *r.LastSHA == head) {
+			continue
+		}
+		d.enqueue(r.BotID, DeployRequest{Trigger: "push"})
+		queued++
+	}
+	return queued
 }

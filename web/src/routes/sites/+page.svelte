@@ -1,4 +1,6 @@
 <script lang="ts">
+	// Sites without any logo or favicon answer 404; show the globe instead.
+	let noIcon = $state<Record<string, boolean>>({});
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { api, ApiError, fmtBytes } from '$lib/api/client';
@@ -121,7 +123,11 @@
 					{@const st = status(s)}
 					<li class="card flex flex-col p-5">
 						<div class="flex items-start justify-between gap-2">
-							<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 text-action" aria-hidden="true"><Icon name="globe" /></span>
+							{#if !noIcon[s.id]}
+								<img src={s.icon_url} alt="" class="size-10 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" onerror={() => (noIcon[s.id] = true)} />
+							{:else}
+								<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 text-action" aria-hidden="true"><Icon name="globe" /></span>
+							{/if}
 							<span class="pill" data-tone={st.tone}>{st.label}</span>
 						</div>
 						<a href="/sites/{s.id}" class="mt-4 truncate text-title font-semibold hover:underline">{s.name}</a>

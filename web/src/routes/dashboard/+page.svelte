@@ -402,7 +402,7 @@
 					{@const d = describe(b, now)}
 					<li class="card flex flex-col p-5">
 						<div class="flex items-start justify-between gap-2">
-							{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-10 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" />{:else}<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 font-mono text-small font-medium text-action" aria-hidden="true">{b.template_id === 'discordts' ? 'TS' : (runtimeTag[b.runtime] ?? b.runtime.slice(0, 2).toUpperCase())}</span>{/if}
+							{#if b.logo_url}<img src={b.logo_url} alt="" class="size-10 shrink-0 rounded-tile object-cover" referrerpolicy="no-referrer" />{:else}<span class="grid size-10 shrink-0 place-items-center rounded-tile bg-paper-2 font-mono text-small font-medium text-action" aria-hidden="true">{b.template_id === 'discordts' ? 'TS' : (runtimeTag[b.runtime] ?? b.runtime.slice(0, 2).toUpperCase())}</span>{/if}
 							<div class="flex items-center gap-1.5">
 								<span class="pill" data-tone={d.tone} title={d.detail || undefined}><span class="side-dot !m-0 !size-1.5" data-tone={d.tone}></span>{d.label}</span>
 								{#if can(b, Perm.power) && session.features.runner}
@@ -451,7 +451,7 @@
 				{@const d = describe(b, now)}
 				<li class="spine grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-rule-soft py-3 pr-2 pl-5 last:border-b-0 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.6fr)_10rem_auto]" data-tone={d.tone} data-busy={d.busy}>
 					<div class="flex min-w-0 items-start gap-2">
-						{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-8 shrink-0 rounded-lg object-cover" referrerpolicy="no-referrer" />{/if}
+						{#if b.logo_url}<img src={b.logo_url} alt="" class="size-8 shrink-0 rounded-lg object-cover" referrerpolicy="no-referrer" />{/if}
 						{#if can(b, Perm.power) && session.features.runner}
 							<input type="checkbox" class="mt-1.5 shrink-0" aria-label="Select {b.name}" bind:checked={selected[b.id]} />
 						{/if}

@@ -26,7 +26,9 @@ func TestSiteBaseDomainsMigrationKeepsSites(t *testing.T) {
 	before := fstest.MapFS{}
 	all, _ := fs.Glob(migrations.FS, "*.sql")
 	for _, f := range all {
-		if !strings.HasPrefix(f, "0035_") {
+		// Everything except 0035 and the later migrations that change sites
+		// (they assume 0035's table): the seed below uses current bot columns.
+		if !strings.HasPrefix(f, "0035_") && !strings.HasPrefix(f, "0037_") {
 			b, _ := fs.ReadFile(migrations.FS, f)
 			before[f] = &fstest.MapFile{Data: b}
 		}

@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 const (
 	DesiredStopped = "stopped"
 	DesiredRunning = "running"
@@ -47,7 +49,17 @@ type Bot struct {
 	BandwidthKbps   *int64
 	Ports           []BotPort // loaded by GetBot only
 
+	// BuildCommand, when set, is a shell script that replaces the runtime's
+	// default build step. It runs in the builder container (no bot secrets).
+	BuildCommand string
+	// Addons are companion services on the bot's private network (loaded by
+	// GetBot only).
+	Addons []BotAddon
+
 	AutoBackupOff bool // scheduled backups disabled for this bot
+
+	// LogoUpdatedMS is when a custom logo was set (0 = none).
+	LogoUpdatedMS int64
 
 	// Restart policy. "" behaves as RestartOnFailure with runner defaults.
 	RestartPolicy           string
@@ -82,6 +94,29 @@ const (
 	RestartNever     = "never"
 	RestartOnFailure = "on_failure"
 )
+
+// Logo is a custom bot or site logo (a small PNG or JPEG).
+type Logo struct {
+	Data        []byte
+	ContentType string
+	UpdatedAtMS int64
+}
+
+// BotAddon is a companion service (database, cache) that runs next to a bot.
+// Kind is also its host name on the bot's private network.
+type BotAddon struct {
+	BotID       string
+	Kind        string
+	MemoryBytes int64
+	CreatedAtMS int64
+	UpdatedAtMS int64
+}
+
+// AddonPasswordVar is the system-managed variable holding an add-on's
+// generated password (sealed like any other bot variable).
+func AddonPasswordVar(kind string) string {
+	return "BOTPANEL_ADDON_" + strings.ToUpper(kind) + "_PASSWORD"
+}
 
 // EnvVar is an encrypted environment variable row.
 type EnvVar struct {

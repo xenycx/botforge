@@ -63,6 +63,18 @@ first), Docker events, a 30 s resync that also removes orphan containers, and
 loss of the Docker connection (the runner reports not-ready, then re-syncs).
 The runner owns restarts; Docker's restart policy is disabled.
 
+### Add-ons
+
+A bot's add-ons (`bot_addons`) are reconciled by the same per-bot pass. Before
+the runtime container is created, the runner ensures the internal network
+`botpanel-<bot>-net`, creates or starts each add-on container
+(`botpanel-<bot>-addon-<kind>`, role `addon`, reused while its spec hash, which
+excludes the password, is unchanged), waits for their Docker health checks,
+then creates the bot, connects it to the network and starts it. Stopping a bot
+stops its add-ons; deleting it removes their containers, the network and the
+data directory. Add-on containers are excluded from the "outdated container"
+rule that replaces stale runtime containers.
+
 ## Console
 
 `GET /bots/{id}/console` upgrades to a WebSocket after authentication,

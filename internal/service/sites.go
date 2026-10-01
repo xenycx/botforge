@@ -30,6 +30,8 @@ import (
 
 // SiteStore is the persistence surface of static site hosting.
 type SiteStore interface {
+	SetSiteLogo(ctx context.Context, siteID string, l *domain.Logo, nowMS int64) error
+	GetSiteLogo(ctx context.Context, siteID string) (domain.Logo, error)
 	CreateSite(ctx context.Context, s domain.Site) error
 	GetSite(ctx context.Context, id string) (domain.Site, error)
 	GetSiteForBot(ctx context.Context, botID string) (domain.Site, error)
@@ -839,7 +841,7 @@ func (s *SiteService) linkRepo(ctx context.Context, actor domain.User, st *domai
 	if s.GH == nil || s.OAuth == nil {
 		return domain.Invalid("GitHub deployments are not available on this panel")
 	}
-	if !github.FullNameRe.MatchString(in.FullName) {
+	if !github.ValidFullName(in.FullName) {
 		return domain.Invalid("repository must look like owner/name")
 	}
 	if !github.ValidBranch(in.Branch) {

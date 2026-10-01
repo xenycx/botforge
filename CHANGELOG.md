@@ -8,6 +8,45 @@ authoritative current version.
 
 ### Added
 
+- **Deploy any public GitHub repository without a GitHub connection.** New bot
+  → Deploy from GitHub now has *Paste a link* (owner/name, a GitHub URL, or a
+  `/tree/<branch>/<folder>` link) next to *My repositories*, with a repository
+  card (description, stars, language, license). The bot's Deploy tab accepts
+  pasted repositories too. A GitHub connection is still used when present
+  (private repositories, higher rate limit).
+- **Auto-deploy by polling** when no webhook can be installed (someone else's
+  repository, no GitHub connection, or no public panel address): the branch is
+  checked every five minutes and each new head is deployed once.
+- **Start after the first deployment** for new GitHub bots, so they no longer
+  stay stopped until the files arrive.
+- **Analyze repository** in the creation flow: verified recipes for
+  Red-DiscordBot and YAGPDB (offered as one-click *Popular open-source bots*),
+  otherwise detection of the language, start command, build command (TypeScript,
+  Yarn/pnpm, Go `cmd/<name>`, Maven/Gradle, Pipenv/Poetry), variables (from
+  `.env.example`-style files and the code, with descriptions and secret flags),
+  databases (client libraries, Prisma, docker-compose images), Dockerfile hints
+  and resources, optionally **refined by the AI** provider. Suggestions only
+  prefill the form and are validated again when the bot is created.
+- **Add-ons**: PostgreSQL 17, Redis 7, MongoDB 7 and MariaDB 11 next to a bot,
+  chosen at creation or on the new **Add-ons** tab. Each runs hardened like a
+  bot, on a private per-bot network **without internet access** that only the
+  bot reaches, by host name; the bot gets `DATABASE_URL`, `REDIS_URL`,
+  `MONGODB_URI`, `MYSQL_URL` and friends automatically, generated passwords are
+  sealed, the bot starts only after its add-ons are healthy, and add-on memory
+  counts toward memory budgets. The tab shows state, health, data size, the
+  connection variables and the add-on's log (migration `0036`). Add-on data is
+  not included in backups.
+- **`${NAME}` references in bot variables**, expanded when the container
+  starts, for example `YAGPDB_PQPASSWORD=${POSTGRES_PASSWORD}`.
+- **Custom build commands** (Startup → Build): shell commands that replace the
+  language's default build step, run in the existing build container without
+  the bot's variables (migration `0036`).
+- **Logos for bots and sites** (migration `0037`): upload a custom logo (cropped
+  and resized in the browser); bots otherwise show their Discord avatar, which
+  **Get avatar from Discord** now fetches with the bot's own token (no SDK
+  needed); sites otherwise show their release's favicon, or their bot's logo.
+  The sites list shows site icons.
+
 - **Email through Mailgun** (`docs/email.md`), off until an administrator
   configures it in Administration → Panel settings → Email (Mailgun) or with
   `BOTPANEL_MAILGUN_API_KEY`, `BOTPANEL_MAILGUN_DOMAIN`,
@@ -69,6 +108,16 @@ authoritative current version.
 
 ### Changed
 
+- The default Python build also installs packaged projects (`setup.py`, or a
+  `pyproject.toml` with `[project]` or Poetry metadata) when there is no
+  `requirements.txt`, and stops at the first failing step.
+- The bot status bar keeps the status and power buttons on one row with the
+  usage meters in an even grid below; unavailable power buttons are shown
+  neutral instead of faded colors.
+- Creating a bot from GitHub, configuring a repository, deploying and the
+  deployment preview no longer require GitHub sign-in to be configured on the
+  panel when the repository is public.
+
 - **Migration `0035`** rebuilds the `sites` table: the panel-wide unique slug
   becomes unique per sites domain, and each site records its sites domain.
   Every release, custom domain and assistant chat is kept. On first start the
@@ -82,6 +131,14 @@ authoritative current version.
   single connection, are checked with `PRAGMA foreign_key_check` before
   commit, and turn foreign keys back on afterwards.
 
+### Security
+
+- Repository names whose owner or name is only dots (`a/..`) are refused
+  everywhere a GitHub API path is built.
+- Logos are validated (PNG or JPEG, 16–512 px, at most 256 KiB) and every logo
+  or favicon is served only to people with access, sandboxed and with
+  `nosniff`.
+
 ### Fixed
 
 - **Security:** setting a password with no session to keep did not sign the
@@ -91,6 +148,14 @@ authoritative current version.
   relies on it. Sessions created before the fix are not affected by past resets
   retroactively: reset again, or use "sign out other sessions", if a past reset
   was meant to end a compromise.
+- After the panel restarted, bots whose containers kept running showed
+  "Running since" the restart time ("just now") instead of when the container
+  actually started. Adopted containers now keep Docker's recorded start time;
+  uptime shown before this fix corrects itself the next time the bot starts.
+- Diagnostic containers left running by an interrupted AI diagnostic run are
+  now removed after the 30-minute grace period. Docker's container list does
+  not report start times for running containers, so these orphans were never
+  cleaned up and kept running until removed by hand.
 
 ### Operational notes
 

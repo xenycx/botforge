@@ -51,6 +51,15 @@ type githubIn struct {
 	Branch     string `json:"branch"`
 	RootDir    string `json:"root_dir"`
 	AutoDeploy bool   `json:"auto_deploy"`
+	// StartAfterDeploy (creation only) starts the bot once its first
+	// deployment has put the files in place.
+	StartAfterDeploy bool `json:"start_after_deploy"`
+}
+
+// addonIn accepts {"kind": "postgres"} with an optional memory limit.
+type addonIn struct {
+	Kind        string `json:"kind"`
+	MemoryBytes int64  `json:"memory_bytes"`
 }
 
 func (s *server) createBot(c fiber.Ctx) error {
@@ -65,6 +74,10 @@ func (s *server) createBot(c fiber.Ctx) error {
 		WorkspaceID string            `json:"workspace_id"`
 		GitHub      *githubIn         `json:"github"`
 		Env         map[string]string `json:"env"`
+		// BuildCommand replaces the runtime's build step; Addons attaches
+		// databases (kinds from GET /addons).
+		BuildCommand string    `json:"build_command"`
+		Addons       []addonIn `json:"addons"`
 	}
 	if err := decode(c, &in); err != nil {
 		return err
@@ -72,6 +85,10 @@ func (s *server) createBot(c fiber.Ctx) error {
 	ci := service.CreateBotInput{
 		Name: in.Name, Runtime: in.Runtime, Argv: in.Argv, MemoryBytes: in.MemoryBytes,
 		NanoCPUs: in.NanoCPUs, PidsLimit: in.PidsLimit, TemplateID: in.TemplateID, Env: in.Env, WorkspaceID: in.WorkspaceID,
+		BuildCommand: in.BuildCommand,
+	}
+	for _, a := range in.Addons {
+		ci.Addons = append(ci.Addons, service.AddonInput{Kind: a.Kind, MemoryBytes: a.MemoryBytes})
 	}
 	if in.GitHub != nil {
 		if in.TemplateID != nil {
@@ -81,7 +98,8 @@ func (s *server) createBot(c fiber.Ctx) error {
 			return fiber.ErrNotFound
 		}
 		b, _, err := s.deploy.CreateFromGitHub(c.Context(), currentUser(c), ci,
-			service.ConfigureInput{FullName: in.GitHub.FullName, Branch: in.GitHub.Branch, RootDir: in.GitHub.RootDir, AutoDeploy: in.GitHub.AutoDeploy})
+			service.ConfigureInput{FullName: in.GitHub.FullName, Branch: in.GitHub.Branch, RootDir: in.GitHub.RootDir, AutoDeploy: in.GitHub.AutoDeploy},
+			in.GitHub.StartAfterDeploy)
 		if err != nil {
 			return err
 		}
@@ -257,6 +275,8 @@ func (s *server) patchBot(c fiber.Ctx) error {
 		RestartMaxAttempts      *int64  `json:"restart_max_attempts"`
 		RestartBackoffInitialMS *int64  `json:"restart_backoff_initial_ms"`
 		RestartBackoffMaxMS     *int64  `json:"restart_backoff_max_ms"`
+
+		BuildCommand *string `json:"build_command"`
 	}
 	if err := decode(c, &in); err != nil {
 		return err
@@ -266,6 +286,7 @@ func (s *server) patchBot(c fiber.Ctx) error {
 		Runtime: in.Runtime, Entrypoint: in.Entrypoint, NetworkEnabled: in.NetworkEnabled, BandwidthKbps: in.BandwidthKbps, AutoBackup: in.AutoBackup,
 		RestartPolicy: in.RestartPolicy, RestartMaxAttempts: in.RestartMaxAttempts,
 		RestartBackoffInitialMS: in.RestartBackoffInitialMS, RestartBackoffMaxMS: in.RestartBackoffMaxMS,
+		BuildCommand: in.BuildCommand,
 	})
 	if err != nil {
 		return err

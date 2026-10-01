@@ -2,8 +2,8 @@ import { goto } from '$app/navigation';
 import { api, setCsrf, setUnauthorizedHandler } from '$lib/api/client';
 import type { User } from '$lib/api/types';
 
-export type Features = { runner: boolean; console: boolean; stats: boolean; files: boolean; deploy: boolean; backups: boolean; analytics: boolean; sftp: boolean; operations: boolean; oauth: boolean; schedules: boolean; mfa: boolean; automation: boolean; health: boolean; sites: boolean; workspaces: boolean; ai: boolean; mail: boolean };
-const allOn: Features = { runner: true, console: true, stats: true, files: true, deploy: true, backups: true, analytics: true, sftp: true, operations: true, oauth: true, schedules: true, mfa: true, automation: true, health: true, sites: false, workspaces: true, ai: true, mail: false };
+export type Features = { runner: boolean; console: boolean; stats: boolean; files: boolean; deploy: boolean; backups: boolean; analytics: boolean; sftp: boolean; operations: boolean; oauth: boolean; schedules: boolean; mfa: boolean; automation: boolean; health: boolean; sites: boolean; workspaces: boolean; ai: boolean; mail: boolean; public_repos: boolean; addons: boolean };
+const allOn: Features = { runner: true, console: true, stats: true, files: true, deploy: true, backups: true, analytics: true, sftp: true, operations: true, oauth: true, schedules: true, mfa: true, automation: true, health: true, sites: false, workspaces: true, ai: true, mail: false, public_repos: true, addons: true };
 export const session = $state<{ user: User | null; loaded: boolean; hasPassword: boolean; emailAlerts: boolean; emailNews: boolean; features: Features }>({ user: null, loaded: false, hasPassword: true, emailAlerts: true, emailNews: true, features: allOn });
 
 setUnauthorizedHandler(() => {

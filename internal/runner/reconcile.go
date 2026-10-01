@@ -133,6 +133,11 @@ func (r *Runner) sweep(ctx context.Context, id string) {
 			r.log.Warn("remove orphan container", "bot", id, "container", c.ID, "err", err)
 		}
 	}
+	if len(conts) > 0 {
+		if nw, err := r.networker(); err == nil {
+			_ = nw.RemoveNetwork(ctx, AddonNetwork(id))
+		}
+	}
 }
 
 // teardown removes containers, then the workspace, and only then the row, so a
@@ -146,6 +151,9 @@ func (r *Runner) teardown(ctx context.Context, id string) error {
 		if err := r.removeContainer(ctx, c); err != nil {
 			return fmt.Errorf("remove container: %w", err)
 		}
+	}
+	if err := r.removeAddonResources(ctx, id); err != nil {
+		return err
 	}
 	if err := r.ws.Remove(id); err != nil {
 		return fmt.Errorf("remove workspace: %w", err)
@@ -171,6 +179,14 @@ func (r *Runner) doStop(ctx context.Context, bot domain.Bot) time.Duration {
 	}
 	var last *ContainerInfo
 	for _, c := range conts {
+		if c.Role() == RoleAddon {
+			if c.Live() {
+				if err := r.docker.Stop(ctx, c.ID, r.opts.StopTimeout); err != nil && !errors.Is(err, ErrNoContainer) {
+					return r.fail(ctx, bot, "an add-on did not stop", err, st)
+				}
+			}
+			continue
+		}
 		if c.Role() == RoleBuilder {
 			if err := r.removeContainer(ctx, c); err != nil {
 				return r.fail(ctx, bot, "could not remove build container", err, st)
@@ -241,8 +257,11 @@ func (r *Runner) doRun(ctx context.Context, bot domain.Bot) time.Duration {
 
 	want := r.wantHash(bot, rt, host)
 	var run *ContainerInfo
+	var addonConts []ContainerInfo
 	for _, c := range conts {
 		switch {
+		case c.Role() == RoleAddon:
+			addonConts = append(addonConts, c)
 		case c.Role() == RoleBuilder:
 			// The reconciler is serialized per bot, so a builder found here is a
 			// leftover from an interrupted pass.
@@ -264,13 +283,27 @@ func (r *Runner) doRun(ctx context.Context, bot domain.Bot) time.Duration {
 		case "running":
 			if bot.ObservedState != "running" || bot.ObservedGeneration != bot.Generation ||
 				bot.ContainerID == nil || *bot.ContainerID != run.ID || bot.LastError != nil || bot.StateReason != nil || bot.NextRetryAtMS != nil {
-				if !r.observe(ctx, bot, sqlite.Observation{State: "running", SettleGeneration: true, ContainerID: run.ID}) {
+				o := sqlite.Observation{State: "running", SettleGeneration: true, ContainerID: run.ID}
+				if bot.ObservedState != "running" {
+					// Adopting a container that was already running (e.g. after a
+					// panel restart): keep its real start time, not now.
+					o.StartedAtMS = r.containerStartMS(ctx, *run)
+				}
+				if !r.observe(ctx, bot, o) {
 					return immediate
 				}
 			}
+			r.reviveAddons(ctx, bot, addonConts)
 			return 0
 		case "created":
-			return r.startContainer(ctx, bot, run.ID, st)
+			if len(bot.Addons) == 0 {
+				return r.startContainer(ctx, bot, run.ID, st)
+			}
+			// It may have missed joining the add-on network (an interrupted
+			// pass): create it again together with its add-ons.
+			if err := r.removeContainer(ctx, *run); err != nil {
+				return r.fail(ctx, bot, "could not replace container", err, st)
+			}
 		case "exited", "dead":
 			if d, done := r.handleExit(ctx, bot, *run, st); done {
 				return d
@@ -281,7 +314,24 @@ func (r *Runner) doRun(ctx context.Context, bot domain.Bot) time.Duration {
 			}
 		}
 	}
-	return r.create(ctx, bot, rt, host, st)
+	return r.create(ctx, bot, rt, host, st, addonConts)
+}
+
+// containerStartMS is when a live container started, or 0 when unknown.
+// Listings omit the start time of live containers, so it is inspected then.
+func (r *Runner) containerStartMS(ctx context.Context, c ContainerInfo) int64 {
+	started := c.StartedAt
+	if started.IsZero() {
+		info, err := r.docker.Inspect(ctx, c.ID)
+		if err != nil {
+			return 0
+		}
+		started = info.StartedAt
+	}
+	if started.IsZero() || started.After(r.now()) {
+		return 0
+	}
+	return started.UnixMilli()
 }
 
 // crashBackoff is the delay before restart attempt number `attempts`, using the
@@ -405,7 +455,7 @@ func (r *Runner) resolve(ctx context.Context, ref string) (string, error) {
 	return v, nil
 }
 
-func (r *Runner) create(ctx context.Context, bot domain.Bot, rt runtimes.Runtime, host string, st *botState) time.Duration {
+func (r *Runner) create(ctx context.Context, bot domain.Bot, rt runtimes.Runtime, host string, st *botState, addonConts []ContainerInfo) time.Duration {
 	if !r.observe(ctx, bot, sqlite.Observation{State: "building"}) {
 		return immediate
 	}
@@ -460,11 +510,35 @@ func (r *Runner) create(ctx context.Context, bot domain.Bot, rt runtimes.Runtime
 	if err != nil {
 		return r.fail(ctx, bot, "environment could not be decrypted", err, st)
 	}
-	id, err := r.docker.Create(ctx, r.runtimeSpec(bot, rt, image, host, envMap))
+	if len(bot.Addons) > 0 || len(addonConts) > 0 {
+		if msg, err := r.ensureAddons(ctx, bot, addonConts, envMap); err != nil {
+			if ctx.Err() != nil {
+				return immediate
+			}
+			return r.fail(ctx, bot, msg, err, st)
+		}
+		if r.intentChanged(ctx, bot) {
+			return immediate
+		}
+	}
+	spec := r.runtimeSpec(bot, rt, image, host, envMap)
+	id, err := r.docker.Create(ctx, spec)
 	if err != nil {
 		// A lost response may still have created the container; the next pass
 		// rediscovers it by label instead of creating a duplicate.
 		return r.fail(ctx, bot, "container could not be created", err, st)
+	}
+	if len(spec.Networks) > 0 {
+		nw, err := r.networker()
+		for _, n := range spec.Networks {
+			if err == nil {
+				err = nw.ConnectNetwork(ctx, n, id)
+			}
+		}
+		if err != nil {
+			_ = r.docker.Remove(ctx, id)
+			return r.fail(ctx, bot, "the bot could not join its add-on network", err, st)
+		}
 	}
 	// Persist the ID before starting so a crash cannot orphan a running container.
 	if !r.observe(ctx, bot, sqlite.Observation{State: "starting", ContainerID: id}) {
@@ -475,7 +549,13 @@ func (r *Runner) create(ctx context.Context, bot domain.Bot, rt runtimes.Runtime
 
 // needsBuild reports whether the build stage will run for this generation.
 func (r *Runner) needsBuild(bot domain.Bot, rt runtimes.Runtime, st *botState) bool {
-	if len(rt.BuildArgv) == 0 || (st.built && st.builtGen == bot.Generation) {
+	if st.built && st.builtGen == bot.Generation {
+		return false
+	}
+	if bot.BuildCommand != "" {
+		return true // a custom command always runs, whatever files exist
+	}
+	if len(rt.BuildArgv) == 0 {
 		return false
 	}
 	if len(rt.BuildIfFiles) == 0 {

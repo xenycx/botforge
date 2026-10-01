@@ -46,34 +46,17 @@
 		kill: mayBeLive(bot)
 	});
 	const dot = $derived({ run: 'bg-run', warn: 'bg-warn', fail: 'bg-fail', idle: 'bg-muted' }[d.tone]);
-	const btn = 'btn gap-1.5 border px-2 disabled:opacity-35 sm:px-3';
+	// Disabled buttons drop their color so only the actions that apply stand out.
+	const btn = 'btn justify-center gap-1.5 border px-2 sm:px-3 disabled:border-rule-soft disabled:bg-transparent disabled:text-muted disabled:opacity-60';
 </script>
 
 <div class="rounded-tile border border-rule-soft bg-panel px-4 py-3" data-tone={d.tone}>
-	<div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+	<div class="flex flex-wrap items-center justify-between gap-3">
 		<span class="inline-flex items-center gap-2 rounded-pill bg-paper-2/70 px-3 py-1.5 text-small font-medium" title={d.detail || undefined}>
 			<span class="size-2 rounded-pill {dot} {d.busy ? 'animate-pulse' : ''}" aria-hidden="true"></span>{d.label}
 		</span>
-
-		{#if showStats}
-			<div class="flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[.78rem]" role="group" aria-label="Resource usage">
-				{#each meters as m (m.k)}
-					<div class="flex items-center gap-2" title="{m.k}: {m.v}">
-						<span class="tracking-[0.12em] text-muted">{m.k}</span>
-						<span class="h-1 w-12 overflow-hidden rounded-pill bg-paper-2" role="meter" aria-label="{m.k} usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(m.p)} aria-valuetext={m.v}>
-							<span class="block h-full {tone(m.p)}" style="width: {Math.max(m.p, m.p > 0 ? 3 : 0)}%"></span>
-						</span>
-						<span class="min-w-12 tabular-nums">{m.v}</span>
-					</div>
-				{/each}
-				<div class="flex items-center gap-1.5" title="Network received since the container started"><span class="tracking-[0.12em] text-muted">NET IN</span><Icon name="download" size={12} class="text-run" /><span class="tabular-nums">{g ? fmtBytes(g.net_rx_bytes) : '0 B'}</span></div>
-				<div class="flex items-center gap-1.5" title="Network sent since the container started"><span class="tracking-[0.12em] text-muted">NET OUT</span><Icon name="upload" size={12} class="text-warn" /><span class="tabular-nums">{g ? fmtBytes(g.net_tx_bytes) : '0 B'}</span></div>
-				{#if link === 'lost'}<span class="text-warn">Live usage unavailable</span>{/if}
-			</div>
-		{/if}
-
 		{#if canPower}
-			<div class="grid w-full grid-cols-4 gap-2 sm:ml-auto sm:flex sm:w-auto" role="group" aria-label="Power controls">
+			<div class="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto" role="group" aria-label="Power controls">
 				<button class="{btn} border-run/45 bg-run/12 text-run hover:bg-run/20" disabled={acting || !can.start} onclick={() => onAct('start')}><Icon name="play" size={11} />Start</button>
 				<button class="{btn} border-warn/45 bg-warn/12 text-warn hover:bg-warn/20" disabled={acting || !can.restart} onclick={() => onAct('restart')}><Icon name="restart" size={13} />Restart</button>
 				<button class="{btn} border-fail/40 bg-fail/10 text-fail hover:bg-fail/18" disabled={acting || !can.stop} onclick={() => onAct('stop')}><Icon name="stop" size={11} />Stop</button>
@@ -81,6 +64,26 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if showStats}
+		<div class="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-rule-soft pt-3 font-mono text-[.78rem] sm:grid-cols-3 lg:grid-cols-5" role="group" aria-label="Resource usage">
+			{#each meters as m (m.k)}
+				<div class="min-w-0" title="{m.k}: {m.v}">
+					<div class="flex items-baseline justify-between gap-2"><span class="tracking-[0.12em] text-muted">{m.k}</span><span class="truncate tabular-nums">{m.v}</span></div>
+					<span class="mt-1.5 block h-1 overflow-hidden rounded-pill bg-paper-2" role="meter" aria-label="{m.k} usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(m.p)} aria-valuetext={m.v}>
+						<span class="block h-full {tone(m.p)}" style="width: {Math.max(m.p, m.p > 0 ? 3 : 0)}%"></span>
+					</span>
+				</div>
+			{/each}
+			<div class="min-w-0" title="Network received since the container started">
+				<div class="flex items-baseline justify-between gap-2"><span class="tracking-[0.12em] text-muted">NET IN</span><span class="inline-flex items-center gap-1 tabular-nums"><Icon name="download" size={12} class="text-run" />{g ? fmtBytes(g.net_rx_bytes) : '0 B'}</span></div>
+			</div>
+			<div class="min-w-0" title="Network sent since the container started">
+				<div class="flex items-baseline justify-between gap-2"><span class="tracking-[0.12em] text-muted">NET OUT</span><span class="inline-flex items-center gap-1 tabular-nums"><Icon name="upload" size={12} class="text-warn" />{g ? fmtBytes(g.net_tx_bytes) : '0 B'}</span></div>
+			</div>
+			{#if link === 'lost'}<span class="col-span-full text-warn">Live usage unavailable</span>{/if}
+		</div>
+	{/if}
 
 	{#if d.detail}
 		<div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-rule-soft pt-2.5">

@@ -57,6 +57,7 @@ type Store interface {
 	GetGitHubRepo(ctx context.Context, botID string) (domain.GitHubRepo, error)
 	DeleteGitHubRepo(ctx context.Context, botID string) error
 	ListAutoDeployRepos(ctx context.Context, fullName string) ([]domain.GitHubRepo, error)
+	ListPollingRepos(ctx context.Context, limit int) ([]domain.GitHubRepo, error)
 	RecordDeploy(ctx context.Context, botID string, sha *string, errMsg *string, nowMS int64) error
 	SetBotPorts(ctx context.Context, botID string, gen int64, ports []domain.BotPort, nowMS int64) error
 	SetBotTelemetryKey(ctx context.Context, botID string, hash []byte, nowMS int64) error
@@ -110,4 +111,12 @@ type Store interface {
 	ListEnv(ctx context.Context, botID string) ([]domain.EnvVar, error)
 	UpsertEnv(ctx context.Context, botID string, vars []domain.EnvVar, nowMS int64) error
 	DeleteEnv(ctx context.Context, botID, name string, nowMS int64) error
+
+	CreateBotAddon(ctx context.Context, a domain.BotAddon, password *domain.EnvVar, nowMS int64) error
+	UpdateBotAddonMemory(ctx context.Context, botID, kind string, memory, nowMS int64) error
+	DeleteBotAddon(ctx context.Context, botID, kind string, nowMS int64) error
+
+	SetBotLogo(ctx context.Context, botID string, l *domain.Logo, nowMS int64) error
+	GetBotLogo(ctx context.Context, botID string) (domain.Logo, error)
+	SetBotDiscordIdentity(ctx context.Context, botID, userID, username, avatarURL string, nowMS int64) error
 }

@@ -169,7 +169,7 @@
 				{@const d = describe(b)}
 				<li>
 					<a href="/bots/{b.id}" class="side-link {compact ? 'justify-center px-0' : ''}" data-active={path === `/bots/${b.id}`} aria-label={compact ? b.name : undefined} title={compact ? b.name : undefined}>
-						{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-6 shrink-0 rounded-pill object-cover" referrerpolicy="no-referrer" />{:else}<span class="side-dot" data-tone={d.tone}></span>{/if}{#if !compact}<span class="truncate">{b.name}</span>{/if}
+						{#if b.logo_url}<img src={b.logo_url} alt="" class="size-6 shrink-0 rounded-pill object-cover" referrerpolicy="no-referrer" />{:else}<span class="side-dot" data-tone={d.tone}></span>{/if}{#if !compact}<span class="truncate">{b.name}</span>{/if}
 					</a>
 				</li>
 			{:else}

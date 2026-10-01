@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"botpanel/internal/addons"
 	"botpanel/internal/domain"
 	"botpanel/internal/events"
 	"botpanel/internal/runtimes"
@@ -69,6 +70,9 @@ type Options struct {
 	BuildMemory     int64
 	BuildNanoCPUs   int64
 	BuildPids       int64
+
+	// AddonData holds add-on data directories; empty disables add-ons.
+	AddonData addons.DataRoot
 
 	Now func() time.Time
 }
@@ -501,6 +505,12 @@ func (r *Runner) sweepDiagnostics(ctx context.Context) {
 		}
 		since := c.FinishedAt
 		if c.Live() {
+			if c.StartedAt.IsZero() {
+				// the list does not carry start times for live containers
+				if info, err := r.docker.Inspect(ctx, c.ID); err == nil {
+					c = info
+				}
+			}
 			since = c.StartedAt
 		}
 		if since.IsZero() || r.now().Sub(since) < diagnosticGrace {

@@ -38,12 +38,16 @@ func (db *DB) SetDesiredWithin(ctx context.Context, id, desired string, force bo
 	}
 	if desired == domain.DesiredRunning && nodeMemory > 0 && b.DesiredState != domain.DesiredRunning {
 		var others int64
-		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(memory_bytes), 0) FROM bots
+		var need int64
+		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(`+botMemory+`), 0) FROM bots
 			WHERE node_id = ? AND desired_state = 'running' AND id != ?`, b.NodeID, id).Scan(&others); err != nil {
 			return b, false, err
 		}
-		if others+b.MemoryBytes > nodeMemory {
-			return b, false, &domain.CapacityError{Need: b.MemoryBytes, Free: max(nodeMemory-others, 0), Budget: nodeMemory}
+		if err = tx.QueryRowContext(ctx, `SELECT `+botMemory+` FROM bots WHERE id = ?`, id).Scan(&need); err != nil {
+			return b, false, err
+		}
+		if others+need > nodeMemory {
+			return b, false, &domain.CapacityError{Need: need, Free: max(nodeMemory-others, 0), Budget: nodeMemory}
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE bots SET desired_state = ?, generation = generation + 1, updated_at_ms = ? WHERE id = ?`,
@@ -89,7 +93,10 @@ type Observation struct {
 	NextRetryAtMS int64
 	// RestartCount replaces restart_count when non-nil.
 	RestartCount *int64
-	NowMS        int64
+	// StartedAtMS, when non-zero, is used instead of NowMS as last_started_at_ms
+	// on a transition to running (an adopted container's real start time).
+	StartedAtMS int64
+	NowMS       int64
 }
 
 // Observe persists an observation only if the bot is still at o.Generation, so
@@ -113,11 +120,11 @@ func (db *DB) Observe(ctx context.Context, o Observation) (bool, error) {
 			state_reason = ?,
 			next_retry_at_ms = ?,
 			restart_count = COALESCE(?, restart_count),
-			last_started_at_ms = CASE WHEN ? = 'running' AND observed_state != 'running' THEN ? ELSE last_started_at_ms END,
+			last_started_at_ms = CASE WHEN ? = 'running' AND observed_state != 'running' THEN COALESCE(?, ?) ELSE last_started_at_ms END,
 			observed_at_ms = ?
 		WHERE id = ? AND generation = ?`,
 		o.State, boolInt(o.SettleGeneration), boolInt(o.ClearContainer), cid, cid, o.ExitCode, lastErr,
-		nullStr(o.Reason), nullInt(o.NextRetryAtMS), o.RestartCount, o.State, o.NowMS, o.NowMS,
+		nullStr(o.Reason), nullInt(o.NextRetryAtMS), o.RestartCount, o.State, nullInt(o.StartedAtMS), o.NowMS, o.NowMS,
 		o.BotID, o.Generation)
 	if err != nil {
 		return false, mapErr(err)

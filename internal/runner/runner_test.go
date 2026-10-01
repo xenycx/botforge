@@ -1067,6 +1067,34 @@ func TestLastStartedIsSetOnTransitionOnly(t *testing.T) {
 	}
 }
 
+func TestAdoptionAfterRestartKeepsStartTime(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	g.desire("running", false)
+	g.pass()
+	id := *g.bot().ContainerID
+	started := g.now.Add(-30 * time.Minute).Truncate(time.Millisecond)
+	g.fd.mu.Lock()
+	g.fd.conts[id].StartedAt = started
+	g.fd.listOmitsLiveStart = true
+	g.fd.mu.Unlock()
+
+	// The panel restarts: live observations are demoted, then the still
+	// running container is adopted.
+	g.advance(time.Hour)
+	if n, _ := g.db.MarkNodeObservedUnknown(ctx, domain.LocalNodeID, g.now.UnixMilli()); n != 1 {
+		t.Fatal("observation not demoted")
+	}
+	g.pass()
+	b := g.wantState("running")
+	if *b.ContainerID != id || len(g.fd.created) != 1 {
+		t.Fatal("container was replaced instead of adopted")
+	}
+	if b.LastStartedAtMS == nil || *b.LastStartedAtMS != started.UnixMilli() {
+		t.Fatalf("last_started_at_ms = %v, want %d", b.LastStartedAtMS, started.UnixMilli())
+	}
+}
+
 type recBuilds struct {
 	mu      sync.Mutex
 	started int

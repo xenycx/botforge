@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/jsonmessage"
@@ -183,6 +184,9 @@ func (a *Adapter) inspect(ctx context.Context, id string) (runner.ContainerInfo,
 		info.State, info.ExitCode, info.OOMKilled = s.Status, s.ExitCode, s.OOMKilled
 		info.StartedAt, _ = time.Parse(time.RFC3339Nano, s.StartedAt)
 		info.FinishedAt, _ = time.Parse(time.RFC3339Nano, s.FinishedAt)
+		if s.Health != nil {
+			info.Health = string(s.Health.Status)
+		}
 	}
 	return info, nil
 }
@@ -196,7 +200,7 @@ func (a *Adapter) Inspect(ctx context.Context, id string) (runner.ContainerInfo,
 func (a *Adapter) Create(ctx context.Context, spec runner.ContainerSpec) (string, error) {
 	ctx, cancel := within(ctx, opTimeout)
 	defer cancel()
-	resp, err := a.cli.ContainerCreate(ctx, ContainerConfig(spec), HostConfig(spec), nil, nil, spec.Name)
+	resp, err := a.cli.ContainerCreate(ctx, ContainerConfig(spec), HostConfig(spec), NetworkingConfig(spec), nil, spec.Name)
 	if err != nil {
 		if errdefs.IsConflict(err) {
 			return "", runner.ErrNameConflict
@@ -347,6 +351,29 @@ func ContainerConfig(s runner.ContainerSpec) *container.Config {
 	if len(s.Entrypoint) > 0 {
 		entry, cmd = s.Entrypoint, s.Argv
 	}
+	if s.KeepImageEntrypoint {
+		entry, cmd = nil, s.Argv
+	}
+	workdir := ""
+	if s.WorkspaceHostPath != "" {
+		workdir = "/workspace"
+	}
+	labels := withInstall(map[string]string{
+		runner.LabelManaged:    "true",
+		runner.LabelBot:        s.BotID,
+		runner.LabelNode:       s.NodeID,
+		runner.LabelRole:       string(s.Role),
+		runner.LabelGeneration: strconv.FormatInt(s.Generation, 10),
+		runner.LabelSpec:       s.SpecHash,
+	}, s.InstallID)
+	if s.AddonKind != "" {
+		labels[runner.LabelAddon] = s.AddonKind
+	}
+	var health *container.HealthConfig
+	if len(s.Health) > 0 {
+		health = &container.HealthConfig{Test: append([]string{"CMD"}, s.Health...), Interval: 5 * time.Second,
+			Timeout: 5 * time.Second, Retries: 5, StartPeriod: 120 * time.Second}
+	}
 	exposed := nat.PortSet{}
 	for _, p := range s.Ports {
 		exposed[nat.Port(fmt.Sprintf("%d/%s", p.ContainerPort, p.Proto))] = struct{}{}
@@ -357,20 +384,25 @@ func ContainerConfig(s runner.ContainerSpec) *container.Config {
 		Entrypoint:   entry,
 		Cmd:          cmd,
 		Env:          s.Env,
-		WorkingDir:   "/workspace",
+		WorkingDir:   workdir,
 		User:         s.User,
 		OpenStdin:    s.OpenStdin, // process input, not a shell
 		StdinOnce:    false,
 		Tty:          false,
-		Labels: withInstall(map[string]string{
-			runner.LabelManaged:    "true",
-			runner.LabelBot:        s.BotID,
-			runner.LabelNode:       s.NodeID,
-			runner.LabelRole:       string(s.Role),
-			runner.LabelGeneration: strconv.FormatInt(s.Generation, 10),
-			runner.LabelSpec:       s.SpecHash,
-		}, s.InstallID),
+		Labels:       labels,
+		Healthcheck:  health,
 	}
+}
+
+// NetworkingConfig gives a container its host-name aliases on a
+// user-defined primary network (add-ons are reached by their kind).
+func NetworkingConfig(s runner.ContainerSpec) *network.NetworkingConfig {
+	if len(s.NetworkAliases) == 0 {
+		return nil
+	}
+	return &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{
+		s.Network: {Aliases: append([]string(nil), s.NetworkAliases...)},
+	}}
 }
 
 func withInstall(labels map[string]string, id string) map[string]string {
@@ -388,15 +420,27 @@ func HostConfig(s runner.ContainerSpec) *container.HostConfig {
 		k := nat.Port(fmt.Sprintf("%d/%s", p.ContainerPort, p.Proto))
 		bindings[k] = append(bindings[k], nat.PortBinding{HostIP: p.HostIP, HostPort: strconv.Itoa(p.HostPort)})
 	}
+	var mounts []mount.Mount
+	bind := func(src, dst string) {
+		mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: src, Target: dst,
+			BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate, CreateMountpoint: false}})
+	}
+	if s.WorkspaceHostPath != "" {
+		bind(s.WorkspaceHostPath, "/workspace")
+	}
+	for _, m := range s.Mounts {
+		bind(m.Source, m.Target)
+	}
+	tmpfs := map[string]string{"/tmp": fmt.Sprintf("rw,nosuid,nodev,size=%d", s.TmpfsBytes)}
+	for _, p := range s.ExtraTmpfs {
+		tmpfs[p] = fmt.Sprintf("rw,nosuid,nodev,size=%d", min(s.TmpfsBytes, 16<<20))
+	}
 	return &container.HostConfig{
-		PortBindings: bindings,
-		Mounts: []mount.Mount{{
-			Type: mount.TypeBind, Source: s.WorkspaceHostPath, Target: "/workspace",
-			BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate, CreateMountpoint: false},
-		}},
+		PortBindings:   bindings,
+		Mounts:         mounts,
 		NetworkMode:    container.NetworkMode(s.Network),
 		ReadonlyRootfs: true,
-		Tmpfs:          map[string]string{"/tmp": fmt.Sprintf("rw,nosuid,nodev,size=%d", s.TmpfsBytes)},
+		Tmpfs:          tmpfs,
 		CapDrop:        []string{"ALL"},
 		SecurityOpt:    []string{"no-new-privileges"}, // default seccomp profile is retained
 		Privileged:     false,
@@ -410,6 +454,47 @@ func HostConfig(s runner.ContainerSpec) *container.HostConfig {
 		},
 	}
 }
+
+// EnsureNetwork creates an internal bridge network unless it exists. An
+// internal network has no route out: add-ons on it cannot reach the internet.
+func (a *Adapter) EnsureNetwork(ctx context.Context, name string, labels map[string]string) error {
+	ctx, cancel := within(ctx, opTimeout)
+	defer cancel()
+	if _, err := a.cli.NetworkInspect(ctx, name, network.InspectOptions{}); err == nil {
+		return nil
+	} else if !errdefs.IsNotFound(err) {
+		return err
+	}
+	_, err := a.cli.NetworkCreate(ctx, name, network.CreateOptions{Driver: "bridge", Internal: true, Labels: labels})
+	if errdefs.IsConflict(err) {
+		return nil // created concurrently
+	}
+	return err
+}
+
+// ConnectNetwork attaches a container to a network (idempotent).
+func (a *Adapter) ConnectNetwork(ctx context.Context, net, id string) error {
+	ctx, cancel := within(ctx, opTimeout)
+	defer cancel()
+	err := a.cli.NetworkConnect(ctx, net, id, nil)
+	if err != nil && (errdefs.IsConflict(err) || strings.Contains(err.Error(), "already exists")) {
+		return nil
+	}
+	return err
+}
+
+// RemoveNetwork deletes a network; a missing one is not an error.
+func (a *Adapter) RemoveNetwork(ctx context.Context, name string) error {
+	ctx, cancel := within(ctx, opTimeout)
+	defer cancel()
+	err := a.cli.NetworkRemove(ctx, name)
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+var _ runner.Networker = (*Adapter)(nil)
 
 // Logs follows a container's output as Docker's multiplexed stream, with
 // timestamps. The container must have Tty=false (the runner guarantees it).

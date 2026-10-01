@@ -12,11 +12,26 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import LogoEditor from '$lib/components/LogoEditor.svelte';
 	import { publishTarget } from '$lib/ai/context.svelte';
 
 	type Detail = { site: Site; role: WorkspaceRole; domains: SiteDomain[]; releases: SiteRelease[]; deploy: { running: boolean; last_error: string; finished_at_ms: number } };
 	const id = $derived(page.params.id ?? '');
 	let d = $state<Detail | null>(null);
+	let logoBusy = $state(false);
+	async function siteLogo(method: 'PUT' | 'DELETE', body?: unknown) {
+		if (!d) return;
+		logoBusy = true;
+		try {
+			const s = await api<Site>(method, `/sites/${d.site.id}/logo`, body);
+			d.site = { ...d.site, icon_url: s.icon_url, custom_logo: s.custom_logo };
+			toast(method === 'PUT' ? 'Logo saved' : 'Custom logo removed', 'success');
+		} catch (err) {
+			toast(err instanceof ApiError ? err.message : 'The logo could not be changed.', 'fail');
+		} finally {
+			logoBusy = false;
+		}
+	}
 	// Tell the assistant which site is in view.
 	const siteName = $derived(d?.site.name ?? '');
 	$effect(() => {
@@ -379,6 +394,12 @@
 			{#if canEdit}
 				<section class="card p-5" aria-labelledby="set-h">
 					<h2 id="set-h" class="text-title font-semibold">Settings</h2>
+					<div class="mt-4">
+						<span class="label">Logo</span>
+						<LogoEditor src={d.site.icon_url} custom={d.site.custom_logo} fallbackLabel={d.site.name.slice(0, 2).toUpperCase()} busy={logoBusy}
+							onUpload={(image) => siteLogo('PUT', { image })} onRemove={() => siteLogo('DELETE')} />
+						<span class="help">Without a custom logo the site's own favicon is used{d.site.bot_id ? ", or else the bot's logo" : ''}.</span>
+					</div>
 					<form class="mt-4 grid gap-4" onsubmit={saveSettings}>
 						<label class="block"><span class="label">Name</span><input class="field" required maxlength="64" bind:value={settings.name} /></label>
 						<label class="block">

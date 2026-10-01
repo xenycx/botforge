@@ -21,7 +21,16 @@ static binary, Docker for isolation.
 * Sign-in with GitHub and Discord (linkable, self-hostable OAuth; `docs/oauth.md`)
 * Optional email through Mailgun: password reset, invitations, bot alerts and security notices (`docs/email.md`) and an admin Announcements tab for HTML news and policy updates; off by default and free at idle
 * Quickstart templates (discord.js, discord.py, Poise, JDA, DiscordGo) and
-  GitHub deployments with auto-deploy on push
+  GitHub deployments from **any public repository** (no GitHub connection
+  needed) with auto-deploy on push or by polling
+* **Analyze repository**: detects language, start/build commands, variables,
+  databases and resources, with verified recipes for Red-DiscordBot and YAGPDB
+  and optional AI refinement
+* **Add-ons**: PostgreSQL, Redis, MongoDB and MariaDB per bot on a private,
+  internet-less network, with connection variables injected; custom build
+  commands for larger projects
+* Custom **logos** for bots and sites, Discord avatars fetched with the bot's
+  token, site favicons picked up automatically
 * Power controls incl. emergency kill, live CPU/RAM/disk gauges, per-bot
   auto-restart policy with backoff, startup/entrypoint editor, network and
   published-port controls

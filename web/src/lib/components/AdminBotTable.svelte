@@ -26,7 +26,7 @@
 					<tr class="[&>td]:px-4 [&>td]:py-2.5 hover:bg-paper/40">
 						<td class="max-w-64">
 							<a href="/bots/{b.id}" class="flex min-w-0 items-center gap-2 font-medium hover:underline">
-								{#if b.discord_avatar_url}<img src={b.discord_avatar_url} alt="" class="size-6 shrink-0 rounded-pill object-cover" referrerpolicy="no-referrer" />{/if}
+								{#if b.logo_url}<img src={b.logo_url} alt="" class="size-6 shrink-0 rounded-pill object-cover" referrerpolicy="no-referrer" />{/if}
 								<span class="truncate">{b.name}</span>
 							</a>
 							<span class="block truncate font-mono text-[11px] text-muted">{b.runtime} · {b.source_type}</span>
