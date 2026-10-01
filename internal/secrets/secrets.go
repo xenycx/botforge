@@ -181,6 +181,9 @@ func OAuthTokenName(provider string) string   { return provider + ":token" }
 func OAuthWebhookName(provider string) string { return provider + ":webhook" }
 func GitHubNS(botID string) string            { return "github:" + botID }
 func MFANS(userID string) string              { return "mfa:" + userID }
+func AIProviderNS(providerID string) string   { return "ai-provider:" + providerID }
+
+const AIProviderKeyName = "bearer"
 
 // GitHubSecretName names a bot's sealed webhook secret.
 const GitHubSecretName = "webhook"

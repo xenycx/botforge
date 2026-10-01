@@ -52,6 +52,13 @@ func mapFSError(err error) error {
 // filesFor authorizes the actor for the bot and opens its workspace. Changes
 // are refused (409) while a deployment or restore replaces the files.
 func (s *server) filesFor(c fiber.Ctx) (*filesystem.Workspace, error) {
+	if siteID := strings.Clone(c.Params("sid")); siteID != "" && s.sites != nil {
+		w, err := s.sites.Draft(c.Context(), currentUser(c), siteID)
+		if err != nil {
+			return nil, err
+		}
+		return w, nil
+	}
 	if s.files == nil {
 		return nil, fiber.ErrNotFound
 	}
@@ -69,6 +76,14 @@ func (s *server) filesFor(c fiber.Ctx) (*filesystem.Workspace, error) {
 		return nil, mapFSError(err)
 	}
 	return w, nil
+}
+
+func (s *server) publishSiteFiles(c fiber.Ctx) error {
+	r, err := s.sites.PublishDraft(c.Context(), currentUser(c), strings.Clone(c.Params("sid")))
+	if err != nil {
+		return mapFSError(err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"release": r.ID, "files": r.Files, "bytes": r.Bytes})
 }
 
 func queryPath(c fiber.Ctx, def string) (string, error) {

@@ -49,6 +49,9 @@ type Runtime struct {
 	// runtimes whose compilers need it (0 = the runner default). Builders get no
 	// swap, so this is real RAM needed while building, not while running.
 	BuildMemoryBytes int64 `yaml:"build_memory_bytes"`
+	// DiagnosticCommands are administrator-approved direct-argv prefixes. The
+	// AI may append safe workspace paths, but can never introduce a shell.
+	DiagnosticCommands [][]string `yaml:"diagnostic_commands"`
 }
 
 // ImageRef is the execution image reference, pinned by digest when known.
@@ -163,6 +166,16 @@ func (r Runtime) validate() error {
 	}
 	if r.BuildMemoryBytes < 0 || r.BuildMemoryBytes > 64<<30 {
 		return fmt.Errorf("build_memory_bytes out of range")
+	}
+	for _, argv := range r.DiagnosticCommands {
+		if len(argv) == 0 || len(argv) > 8 || strings.ContainsAny(argv[0], " \t\r\n") {
+			return fmt.Errorf("invalid diagnostic command prefix")
+		}
+		for _, a := range argv {
+			if strings.ContainsRune(a, 0) {
+				return fmt.Errorf("invalid diagnostic argument")
+			}
+		}
 	}
 	if r.MinMemoryBytes <= 0 || d.MemoryBytes < r.MinMemoryBytes {
 		return fmt.Errorf("min_memory_bytes invalid or above default memory")

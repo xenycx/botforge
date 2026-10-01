@@ -10,5 +10,11 @@ build_argv:
 default_argv: [/workspace/.venv/bin/python, main.py]
 allowed_commands: [python, python3, /workspace/.venv/bin/python]
 env: {PYTHONUNBUFFERED: "1", PIP_DISABLE_PIP_VERSION_CHECK: "1"}
+diagnostic_commands:
+  - [python, -m, compileall]
+  - [python, -m, unittest]
+  - [python, -m, pytest]
+  - [python, -m, ruff]
+  - [python, -m, mypy]
 defaults: {memory_bytes: 268435456, nano_cpus: 500000000, pids_limit: 128}
 min_memory_bytes: 67108864

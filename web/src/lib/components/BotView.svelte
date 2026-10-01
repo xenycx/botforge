@@ -19,7 +19,7 @@
 	import Env from '$lib/components/Env.svelte';
 	import Startup from '$lib/components/Startup.svelte';
 	import Packages from '$lib/components/Packages.svelte';
-	import Analytics from '$lib/components/Analytics.svelte';
+	import PageStudio from '$lib/components/PageStudio.svelte';
 	import Network from '$lib/components/Network.svelte';
 	import Backups from '$lib/components/Backups.svelte';
 	import Deploy from '$lib/components/Deploy.svelte';
@@ -27,6 +27,7 @@
 	import Settings from '$lib/components/Settings.svelte';
 	import Schedules from '$lib/components/Schedules.svelte';
 	import Alerts from '$lib/components/Alerts.svelte';
+	import AIOperator from '$lib/components/AIOperator.svelte';
 
 	let { id }: { id: string } = $props();
 
@@ -44,8 +45,9 @@
 			label: 'Operate',
 			items: [
 				{ id: 'overview', label: 'Overview', icon: 'overview', perm: 0 },
+				{ id: 'ai', label: 'AI operator', icon: 'bolt', perm: 0 },
 				{ id: 'console', label: 'Console', icon: 'terminal', perm: Perm.console },
-				{ id: 'analytics', label: 'Analytics', icon: 'chart', perm: Perm.console },
+				{ id: 'page', label: 'Public page', icon: 'globe', perm: Perm.console },
 				{ id: 'alerts', label: 'Health & alerts', icon: 'activity', perm: Perm.console }
 			]
 		},
@@ -76,12 +78,12 @@
 		}
 	];
 	// Sections for features this panel does not run are left out entirely.
-	const available: Record<string, keyof typeof session.features> = { files: 'files', packages: 'files', backups: 'backups', analytics: 'analytics', schedules: 'schedules', alerts: 'health' };
+	const available: Record<string, keyof typeof session.features> = { ai: 'ai', files: 'files', packages: 'files', backups: 'backups', schedules: 'schedules', alerts: 'health' };
 	const allowed = (s: Section) =>
 		!!bot && (!available[s.id] || session.features[available[s.id]]) && (s.perm === 0 || (s.perm === -1 ? !bot.shared : can(bot, s.perm)));
 	const visibleGroups = $derived(groups.map((g) => ({ ...g, items: g.items.filter(allowed) })).filter((g) => g.items.length));
 	const flat = $derived(visibleGroups.flatMap((g) => g.items));
-	const requested = $derived(page.url.searchParams.get('tab') ?? 'overview');
+	const requested = $derived(page.url.searchParams.get('tab') === 'analytics' ? 'page' : (page.url.searchParams.get('tab') ?? 'overview'));
 	const tab = $derived(flat.some((s) => s.id === requested) ? requested : 'overview');
 	const current = $derived(flat.find((s) => s.id === tab));
 	const idx = $derived(flat.findIndex((s) => s.id === tab));
@@ -238,10 +240,12 @@
 
 			{#if tab === 'overview'}
 				<Overview {bot} {now} onSaved={(b) => (bot = b)} onAct={act} {acting} />
+			{:else if tab === 'ai'}
+				<AIOperator botId={id} targetName={bot.name} />
 			{:else if tab === 'console'}
 				<Console {bot} />
-			{:else if tab === 'analytics'}
-				<Analytics botId={id} canAdmin={admin} {stopped} />
+			{:else if tab === 'page'}
+				<PageStudio botId={id} botName={bot.name} canEdit={can(bot, Perm.files)} canAdmin={admin} {stopped} />
 			{:else if tab === 'files'}
 				<Files botId={id} running={!stopped} />
 			{:else if tab === 'packages'}

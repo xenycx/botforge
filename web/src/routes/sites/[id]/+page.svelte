@@ -12,6 +12,7 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
+	import AIOperator from '$lib/components/AIOperator.svelte';
 
 	type Detail = { site: Site; role: WorkspaceRole; domains: SiteDomain[]; releases: SiteRelease[]; deploy: { running: boolean; last_error: string; finished_at_ms: number } };
 	const id = $derived(page.params.id ?? '');
@@ -213,6 +214,9 @@
 		<a href={d.site.url} target="_blank" rel="noopener" class="btn"><Icon name="external" size={14} />Visit</a>
 	</header>
 	{#if d.site.disabled}<Notice tone="fail" class="mt-4">An administrator suspended this site. Visitors see an “unavailable” page until it is restored.</Notice>{/if}
+	{#if session.features.ai}
+		<section class="mt-6" aria-label="AI operator"><AIOperator siteId={id} targetName={d.site.name} /></section>
+	{/if}
 
 	<div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
 		<div class="grid min-w-0 content-start gap-6">

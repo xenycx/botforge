@@ -28,8 +28,9 @@ const (
 type Role string
 
 const (
-	RoleRuntime Role = "runtime"
-	RoleBuilder Role = "builder"
+	RoleRuntime    Role = "runtime"
+	RoleBuilder    Role = "builder"
+	RoleDiagnostic Role = "diagnostic"
 )
 
 var (

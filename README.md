@@ -30,6 +30,9 @@ static binary, Docker for isolation.
 * **Static site hosting** on a separate listener: ZIP or GitHub publishing,
   instant rollback, custom domains with DNS verification, on-demand TLS via
   the reverse proxy (`docs/sites.md`)
+* Integrated **Bot Sites** in every Discord bot: a generated public page with
+  custom HTML/CSS and opt-in live widgets, or full HTML/CSS/JS files edited in
+  a private draft and published as immutable releases
 * **Publish bots to GitHub**: create a repository from a bot's files and push
   later changes, `.gitignore`-aware and never force-pushed
 * Sub-user sharing with granular permissions; embedded SFTP server with API keys
@@ -125,3 +128,6 @@ not enforced (Docker has no native cap).
 * `npm audit` reports low-severity findings in dev dependencies (not triaged).
 * Recorded in `docs/architecture.md`: console log delivery is at-least-once at
   reconnect boundaries, not exactly-once.
+* Target-scoped **AI Operator** for bots and sites: streamed investigation,
+  approval-gated or bounded automatic repair, encrypted OpenAI-compatible
+  providers, cited web research, safe staged diffs and offline diagnostics.

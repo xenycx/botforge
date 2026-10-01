@@ -10,31 +10,43 @@ import (
 )
 
 type siteDTO struct {
-	ID             string  `json:"id"`
-	WorkspaceID    string  `json:"workspace_id"`
-	WorkspaceName  string  `json:"workspace_name"`
-	OwnerID        string  `json:"owner_id"`
-	OwnerEmail     string  `json:"owner_email"`
-	Name           string  `json:"name"`
-	Slug           string  `json:"slug"`
-	URL            string  `json:"url"`
-	SPA            bool    `json:"spa"`
-	CleanURLs      bool    `json:"clean_urls"`
-	CurrentRelease *string `json:"current_release"`
-	ReleaseBytes   int64   `json:"release_bytes"`
-	Disabled       bool    `json:"disabled"`
-	Domains        int     `json:"domains"`
-	RepoFullName   *string `json:"repo_full_name"`
-	RepoBranch     *string `json:"repo_branch"`
-	RepoRoot       string  `json:"repo_root"`
-	CreatedAtMS    int64   `json:"created_at_ms"`
-	UpdatedAtMS    int64   `json:"updated_at_ms"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	WorkspaceName   string  `json:"workspace_name"`
+	OwnerID         string  `json:"owner_id"`
+	OwnerEmail      string  `json:"owner_email"`
+	BotID           *string `json:"bot_id"`
+	Name            string  `json:"name"`
+	Slug            string  `json:"slug"`
+	URL             string  `json:"url"`
+	SPA             bool    `json:"spa"`
+	CleanURLs       bool    `json:"clean_urls"`
+	Mode            string  `json:"mode"`
+	PageTitle       string  `json:"page_title"`
+	PageDescription string  `json:"page_description"`
+	PageTheme       string  `json:"page_theme"`
+	PageAccent      string  `json:"page_accent"`
+	PageHTML        string  `json:"page_html"`
+	PageCSS         string  `json:"page_css"`
+	WidgetsPublic   bool    `json:"widgets_public"`
+	CurrentRelease  *string `json:"current_release"`
+	ReleaseBytes    int64   `json:"release_bytes"`
+	Disabled        bool    `json:"disabled"`
+	Domains         int     `json:"domains"`
+	RepoFullName    *string `json:"repo_full_name"`
+	RepoBranch      *string `json:"repo_branch"`
+	RepoRoot        string  `json:"repo_root"`
+	CreatedAtMS     int64   `json:"created_at_ms"`
+	UpdatedAtMS     int64   `json:"updated_at_ms"`
 }
 
 func (s *server) toSite(st domain.Site) siteDTO {
-	return siteDTO{st.ID, st.WorkspaceID, st.WorkspaceName, st.OwnerID, st.OwnerEmail, st.Name, st.Slug, s.sites.SiteURL(st.Slug),
-		st.SPA, st.CleanURLs, st.CurrentRelease, st.ReleaseBytes, st.Disabled, st.Domains, st.RepoFullName, st.RepoBranch, st.RepoRoot,
-		st.CreatedAtMS, st.UpdatedAtMS}
+	return siteDTO{ID: st.ID, WorkspaceID: st.WorkspaceID, WorkspaceName: st.WorkspaceName, OwnerID: st.OwnerID, OwnerEmail: st.OwnerEmail,
+		BotID: st.BotID, Name: st.Name, Slug: st.Slug, URL: s.sites.SiteURL(st.Slug), SPA: st.SPA, CleanURLs: st.CleanURLs,
+		Mode: st.Mode, PageTitle: st.PageTitle, PageDescription: st.PageDescription, PageTheme: st.PageTheme, PageAccent: st.PageAccent,
+		PageHTML: st.PageHTML, PageCSS: st.PageCSS, WidgetsPublic: st.WidgetsPublic, CurrentRelease: st.CurrentRelease,
+		ReleaseBytes: st.ReleaseBytes, Disabled: st.Disabled, Domains: st.Domains, RepoFullName: st.RepoFullName, RepoBranch: st.RepoBranch,
+		RepoRoot: st.RepoRoot, CreatedAtMS: st.CreatedAtMS, UpdatedAtMS: st.UpdatedAtMS}
 }
 
 func (s *server) siteList(list []domain.Site) []siteDTO {
@@ -125,11 +137,48 @@ func (s *server) createSite(c fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(s.toSite(st))
 }
 
+func (s *server) createBotSite(c fiber.Ctx) error {
+	botID := strings.Clone(c.Params("id"))
+	b, err := s.bots.Authorize(c.Context(), currentUser(c), botID, domain.PermEditFiles)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Slug string `json:"slug"`
+	}
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	st, err := s.sites.Create(c.Context(), currentUser(c), service.CreateSiteInput{
+		Name: b.Name, Slug: in.Slug, WorkspaceID: b.WorkspaceID, BotID: b.ID, Mode: "page",
+	})
+	if err != nil {
+		return err
+	}
+	d, err := s.sites.Get(c.Context(), currentUser(c), st.ID)
+	if err != nil {
+		return err
+	}
+	return c.Status(fiber.StatusCreated).JSON(s.siteDetailJSON(d))
+}
+
+func (s *server) getBotSite(c fiber.Ctx) error {
+	d, err := s.sites.GetForBot(c.Context(), currentUser(c), strings.Clone(c.Params("id")))
+	if err != nil {
+		return err
+	}
+	return c.JSON(s.siteDetailJSON(d))
+}
+
 func (s *server) getSite(c fiber.Ctx) error {
 	d, err := s.sites.Get(c.Context(), currentUser(c), strings.Clone(c.Params("sid")))
 	if err != nil {
 		return err
 	}
+	return c.JSON(s.siteDetailJSON(d))
+}
+
+func (s *server) siteDetailJSON(d service.SiteDetail) fiber.Map {
 	domains := make([]domainDTO, len(d.Domains))
 	for i, x := range d.Domains {
 		domains[i] = s.toDomain(x, d.Site.Slug)
@@ -139,17 +188,25 @@ func (s *server) getSite(c fiber.Ctx) error {
 		releases[i] = releaseDTO{r.ID, r.Source, r.SourceLabel, r.Files, r.Bytes, r.ActorEmail,
 			d.Site.CurrentRelease != nil && *d.Site.CurrentRelease == r.ID, r.CreatedAtMS}
 	}
-	return c.JSON(fiber.Map{"site": s.toSite(d.Site), "role": d.Role, "domains": domains, "releases": releases,
-		"deploy": fiber.Map{"running": d.Job.Running, "last_error": d.Job.LastError, "finished_at_ms": d.Job.FinishedMS}})
+	return fiber.Map{"site": s.toSite(d.Site), "role": d.Role, "domains": domains, "releases": releases,
+		"deploy": fiber.Map{"running": d.Job.Running, "last_error": d.Job.LastError, "finished_at_ms": d.Job.FinishedMS}}
 }
 
 func (s *server) patchSite(c fiber.Ctx) error {
 	var in struct {
-		Name        *string `json:"name"`
-		SPA         *bool   `json:"spa"`
-		CleanURLs   *bool   `json:"clean_urls"`
-		WorkspaceID *string `json:"workspace_id"`
-		Repo        *struct {
+		Name            *string `json:"name"`
+		SPA             *bool   `json:"spa"`
+		CleanURLs       *bool   `json:"clean_urls"`
+		WorkspaceID     *string `json:"workspace_id"`
+		Mode            *string `json:"mode"`
+		PageTitle       *string `json:"page_title"`
+		PageDescription *string `json:"page_description"`
+		PageTheme       *string `json:"page_theme"`
+		PageAccent      *string `json:"page_accent"`
+		PageHTML        *string `json:"page_html"`
+		PageCSS         *string `json:"page_css"`
+		WidgetsPublic   *bool   `json:"widgets_public"`
+		Repo            *struct {
 			FullName string `json:"full_name"`
 			Branch   string `json:"branch"`
 			RootDir  string `json:"root_dir"`
@@ -159,7 +216,9 @@ func (s *server) patchSite(c fiber.Ctx) error {
 	if err := decode(c, &in); err != nil {
 		return err
 	}
-	up := service.UpdateSiteInput{Name: in.Name, SPA: in.SPA, CleanURLs: in.CleanURLs, WorkspaceID: in.WorkspaceID}
+	up := service.UpdateSiteInput{Name: in.Name, SPA: in.SPA, CleanURLs: in.CleanURLs, WorkspaceID: in.WorkspaceID,
+		Mode: in.Mode, PageTitle: in.PageTitle, PageDescription: in.PageDescription, PageTheme: in.PageTheme,
+		PageAccent: in.PageAccent, PageHTML: in.PageHTML, PageCSS: in.PageCSS, WidgetsPublic: in.WidgetsPublic}
 	if in.Repo != nil {
 		up.Repo = &service.RepoInput{FullName: in.Repo.FullName, Branch: in.Repo.Branch, RootDir: in.Repo.RootDir, Clear: in.Repo.Clear}
 	}

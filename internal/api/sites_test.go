@@ -203,6 +203,61 @@ func TestStaticSiteLifecycle(t *testing.T) {
 	}
 }
 
+func TestBotSitePageAndEditableDraft(t *testing.T) {
+	r := newSiteRig(t)
+	c := r.owner
+	botID := c.createBot("Beacon")
+
+	var detail struct {
+		Site struct {
+			ID        string  `json:"id"`
+			URL       string  `json:"url"`
+			Mode      string  `json:"mode"`
+			PageTitle string  `json:"page_title"`
+			BotID     *string `json:"bot_id"`
+		} `json:"site"`
+	}
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/bots/"+botID+"/site", map[string]string{"slug": "beacon-page"}), &detail)
+	if detail.Site.BotID == nil || *detail.Site.BotID != botID || detail.Site.Mode != "page" || detail.Site.PageTitle != "Beacon" {
+		t.Fatalf("bot site = %+v", detail.Site)
+	}
+	c.mustStatus(400, "POST", "/api/v1/bots/"+botID+"/site", map[string]string{"slug": "another-page"})
+
+	patch := map[string]any{
+		"page_title": "Beacon community", "page_description": "Commands, status, and community links.",
+		"page_theme": "daylight", "page_accent": "#3366cc", "page_html": "<h2>Join us</h2>",
+		"page_css": ".author-content{max-width:40rem}", "widgets_public": true,
+	}
+	c.mustStatus(200, "PATCH", "/api/v1/sites/"+detail.Site.ID, patch)
+	rec := r.get("beacon-page.sites.test", "/")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Beacon community") || !strings.Contains(rec.Body.String(), "Join us") {
+		t.Fatalf("public page: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "owner@x.io") || strings.Contains(rec.Body.String(), "Commands, status, and community links.</p></header><section class=\"author-content\"></section>") {
+		t.Fatal("public page leaked private identity or omitted configured content")
+	}
+	if rec := r.get("beacon-page.sites.test", "/private"); rec.Code != 404 {
+		t.Fatalf("generated page unknown path = %d", rec.Code)
+	}
+
+	// Site files are a private draft until explicitly published and selected.
+	var list struct{ Entries []entryDTO }
+	json.Unmarshal(c.mustStatus(200, "GET", "/api/v1/sites/"+detail.Site.ID+"/files?path=.", nil), &list)
+	if len(list.Entries) == 0 {
+		t.Fatal("new site draft was not seeded")
+	}
+	resp, body := c.raw("PUT", "/api/v1/sites/"+detail.Site.ID+"/files/content?path=index.html", []byte("<!doctype html><title>Hand made</title><h1>Custom site</h1>"), "text/html")
+	if resp.StatusCode != 204 {
+		t.Fatalf("write draft: %d %s", resp.StatusCode, body)
+	}
+	c.mustStatus(201, "POST", "/api/v1/sites/"+detail.Site.ID+"/files/publish", nil)
+	c.mustStatus(200, "PATCH", "/api/v1/sites/"+detail.Site.ID, map[string]string{"mode": "files"})
+	rec = r.get("beacon-page.sites.test", "/")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Custom site") {
+		t.Fatalf("custom file site: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSiteCustomDomains(t *testing.T) {
 	r := newSiteRig(t)
 	c := r.owner

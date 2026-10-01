@@ -8,15 +8,16 @@ import (
 )
 
 func (db *DB) InsertAudit(ctx context.Context, e domain.AuditEvent) error {
-	_, err := db.ExecContext(ctx, `INSERT INTO audit_events (at_ms, actor_id, actor_label, bot_id, bot_name, subject_user_id,
-		action, target, outcome, ip) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		e.AtMS, e.ActorID, e.ActorLabel, e.BotID, e.BotName, e.SubjectUserID, e.Action, e.Target, e.Outcome, e.IP)
+	_, err := db.ExecContext(ctx, `INSERT INTO audit_events (at_ms, actor_id, actor_label, bot_id, bot_name, site_id, site_name, subject_user_id,
+		action, target, outcome, ip) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		e.AtMS, e.ActorID, e.ActorLabel, e.BotID, e.BotName, e.SiteID, e.SiteName, e.SubjectUserID, e.Action, e.Target, e.Outcome, e.IP)
 	return err
 }
 
 // AuditFilter selects events; zero fields do not filter.
 type AuditFilter struct {
 	BotID     string
+	SiteID    string
 	AccountOf string // events by or about this user
 	BotsOf    string // events on bots this user can currently access
 	BeforeID  int64
@@ -28,6 +29,9 @@ func (db *DB) ListAudit(ctx context.Context, f AuditFilter) ([]domain.AuditEvent
 	var args []any
 	if f.BotID != "" {
 		where, args = append(where, "bot_id = ?"), append(args, f.BotID)
+	}
+	if f.SiteID != "" {
+		where, args = append(where, "site_id = ?"), append(args, f.SiteID)
 	}
 	if f.AccountOf != "" {
 		where = append(where, "(actor_id = ? AND bot_id IS NULL OR subject_user_id = ?)")
@@ -46,7 +50,7 @@ func (db *DB) ListAudit(ctx context.Context, f AuditFilter) ([]domain.AuditEvent
 	if f.Limit <= 0 || f.Limit > 200 {
 		f.Limit = 50
 	}
-	q := `SELECT id, at_ms, actor_id, actor_label, bot_id, bot_name, subject_user_id, action, target, outcome, ip FROM audit_events`
+	q := `SELECT id, at_ms, actor_id, actor_label, bot_id, bot_name, site_id, site_name, subject_user_id, action, target, outcome, ip FROM audit_events`
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -58,7 +62,7 @@ func (db *DB) ListAudit(ctx context.Context, f AuditFilter) ([]domain.AuditEvent
 	var out []domain.AuditEvent
 	for rows.Next() {
 		var e domain.AuditEvent
-		if err := rows.Scan(&e.ID, &e.AtMS, &e.ActorID, &e.ActorLabel, &e.BotID, &e.BotName, &e.SubjectUserID, &e.Action, &e.Target, &e.Outcome, &e.IP); err != nil {
+		if err := rows.Scan(&e.ID, &e.AtMS, &e.ActorID, &e.ActorLabel, &e.BotID, &e.BotName, &e.SiteID, &e.SiteName, &e.SubjectUserID, &e.Action, &e.Target, &e.Outcome, &e.IP); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

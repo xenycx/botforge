@@ -8,6 +8,7 @@ import (
 
 const siteCols = `s.id, s.workspace_id, s.owner_id, s.name, s.slug, s.spa, s.clean_urls, s.current_release, s.disabled,
 	s.repo_full_name, s.repo_branch, s.repo_root, s.repo_token_user, s.created_at_ms, s.updated_at_ms,
+	s.bot_id, s.mode, s.page_title, s.page_description, s.page_theme, s.page_accent, s.page_html, s.page_css, s.widgets_public,
 	COALESCE(u.email, ''), COALESCE(w.name, ''),
 	(SELECT count(*) FROM site_domains d WHERE d.site_id = s.id),
 	COALESCE((SELECT r.bytes FROM site_releases r WHERE r.id = s.current_release), 0)`
@@ -16,11 +17,12 @@ const siteFrom = ` FROM sites s LEFT JOIN users u ON u.id = s.owner_id LEFT JOIN
 
 func scanSite(row interface{ Scan(...any) error }) (domain.Site, error) {
 	var s domain.Site
-	var spa, clean, disabled int
+	var spa, clean, disabled, widgetsPublic int
 	err := row.Scan(&s.ID, &s.WorkspaceID, &s.OwnerID, &s.Name, &s.Slug, &spa, &clean, &s.CurrentRelease, &disabled,
 		&s.RepoFullName, &s.RepoBranch, &s.RepoRoot, &s.RepoTokenUser, &s.CreatedAtMS, &s.UpdatedAtMS,
+		&s.BotID, &s.Mode, &s.PageTitle, &s.PageDescription, &s.PageTheme, &s.PageAccent, &s.PageHTML, &s.PageCSS, &widgetsPublic,
 		&s.OwnerEmail, &s.WorkspaceName, &s.Domains, &s.ReleaseBytes)
-	s.SPA, s.CleanURLs, s.Disabled = spa == 1, clean == 1, disabled == 1
+	s.SPA, s.CleanURLs, s.Disabled, s.WidgetsPublic = spa == 1, clean == 1, disabled == 1, widgetsPublic == 1
 	return s, mapErr(err)
 }
 
@@ -43,14 +45,30 @@ func (db *DB) listSites(ctx context.Context, where string, args ...any) ([]domai
 
 // CreateSite inserts a site; a taken slug returns domain.ErrConflict.
 func (db *DB) CreateSite(ctx context.Context, s domain.Site) error {
-	_, err := db.ExecContext(ctx, `INSERT INTO sites (id, workspace_id, owner_id, name, slug, spa, clean_urls, created_at_ms, updated_at_ms)
-		VALUES (?,?,?,?,?,?,?,?,?)`, s.ID, s.WorkspaceID, s.OwnerID, s.Name, s.Slug, boolInt(s.SPA), boolInt(s.CleanURLs), s.CreatedAtMS, s.UpdatedAtMS)
+	if s.Mode == "" {
+		s.Mode = "files"
+	}
+	if s.PageTheme == "" {
+		s.PageTheme = "midnight"
+	}
+	if s.PageAccent == "" {
+		s.PageAccent = "#5865f2"
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO sites (id, workspace_id, owner_id, bot_id, name, slug, spa, clean_urls, mode,
+		page_title, page_description, page_theme, page_accent, page_html, page_css, widgets_public, created_at_ms, updated_at_ms)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, s.ID, s.WorkspaceID, s.OwnerID, s.BotID, s.Name, s.Slug, boolInt(s.SPA), boolInt(s.CleanURLs), s.Mode,
+		s.PageTitle, s.PageDescription, s.PageTheme, s.PageAccent, s.PageHTML, s.PageCSS, boolInt(s.WidgetsPublic), s.CreatedAtMS, s.UpdatedAtMS)
 	return mapErr(err)
 }
 
 // GetSite returns one site.
 func (db *DB) GetSite(ctx context.Context, id string) (domain.Site, error) {
 	return scanSite(db.QueryRowContext(ctx, `SELECT `+siteCols+siteFrom+` WHERE s.id = ?`, id))
+}
+
+// GetSiteForBot returns the single public site attached to a bot.
+func (db *DB) GetSiteForBot(ctx context.Context, botID string) (domain.Site, error) {
+	return scanSite(db.QueryRowContext(ctx, `SELECT `+siteCols+siteFrom+` WHERE s.bot_id = ?`, botID))
 }
 
 // ListSitesForUser returns the sites in the workspaces userID belongs to.
@@ -78,8 +96,10 @@ func (db *DB) CountOwnedSites(ctx context.Context, userID string) (int, error) {
 // UpdateSite stores the mutable settings of a site.
 func (db *DB) UpdateSite(ctx context.Context, s domain.Site) error {
 	res, err := db.ExecContext(ctx, `UPDATE sites SET name = ?, spa = ?, clean_urls = ?, repo_full_name = ?, repo_branch = ?, repo_root = ?,
-		repo_token_user = ?, workspace_id = ?, updated_at_ms = ? WHERE id = ?`,
-		s.Name, boolInt(s.SPA), boolInt(s.CleanURLs), s.RepoFullName, s.RepoBranch, s.RepoRoot, s.RepoTokenUser, s.WorkspaceID, s.UpdatedAtMS, s.ID)
+		repo_token_user = ?, workspace_id = ?, mode = ?, page_title = ?, page_description = ?, page_theme = ?, page_accent = ?,
+		page_html = ?, page_css = ?, widgets_public = ?, updated_at_ms = ? WHERE id = ?`,
+		s.Name, boolInt(s.SPA), boolInt(s.CleanURLs), s.RepoFullName, s.RepoBranch, s.RepoRoot, s.RepoTokenUser, s.WorkspaceID,
+		s.Mode, s.PageTitle, s.PageDescription, s.PageTheme, s.PageAccent, s.PageHTML, s.PageCSS, boolInt(s.WidgetsPublic), s.UpdatedAtMS, s.ID)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -264,7 +284,7 @@ func (db *DB) DeleteDomain(ctx context.Context, siteID, name string) error {
 // verified custom domains.
 func (db *DB) SiteRoutes(ctx context.Context) (bySlug, byDomain map[string]domain.SiteRoute, err error) {
 	bySlug, byDomain = map[string]domain.SiteRoute{}, map[string]domain.SiteRoute{}
-	rows, err := db.QueryContext(ctx, `SELECT s.id, s.slug, COALESCE(s.current_release, ''), s.spa, s.clean_urls, s.disabled, d.domain
+	rows, err := db.QueryContext(ctx, `SELECT s.id, s.slug, COALESCE(s.current_release, ''), s.spa, s.clean_urls, s.disabled, s.mode, d.domain
 		FROM sites s LEFT JOIN site_domains d ON d.site_id = s.id AND d.verified_at_ms IS NOT NULL`)
 	if err != nil {
 		return nil, nil, err
@@ -275,7 +295,7 @@ func (db *DB) SiteRoutes(ctx context.Context) (bySlug, byDomain map[string]domai
 		var slug string
 		var host *string
 		var spa, clean, disabled int
-		if err := rows.Scan(&r.SiteID, &slug, &r.Release, &spa, &clean, &disabled, &host); err != nil {
+		if err := rows.Scan(&r.SiteID, &slug, &r.Release, &spa, &clean, &disabled, &r.Mode, &host); err != nil {
 			return nil, nil, err
 		}
 		r.SPA, r.CleanURLs, r.Disabled = spa == 1, clean == 1, disabled == 1
@@ -285,4 +305,24 @@ func (db *DB) SiteRoutes(ctx context.Context) (bySlug, byDomain map[string]domai
 		}
 	}
 	return bySlug, byDomain, rows.Err()
+}
+
+// PublicSitePage returns only fields intentionally renderable to anonymous
+// visitors. Widgets are included only after the site's explicit opt-in.
+func (db *DB) PublicSitePage(ctx context.Context, siteID string) (domain.PublicSitePage, error) {
+	var p domain.PublicSitePage
+	var widgets int
+	err := db.QueryRowContext(ctx, `SELECT s.id, COALESCE(s.bot_id,''), COALESCE(b.name,''), COALESCE(b.discord_username,''),
+		COALESCE(b.discord_avatar_url,''), s.page_title, s.page_description, s.page_theme, s.page_accent, s.page_html, s.page_css, s.widgets_public
+		FROM sites s LEFT JOIN bots b ON b.id = s.bot_id WHERE s.id = ? AND s.mode = 'page'`, siteID).
+		Scan(&p.SiteID, &p.BotID, &p.BotName, &p.DiscordUsername, &p.DiscordAvatarURL, &p.Title, &p.Description,
+			&p.Theme, &p.Accent, &p.HTML, &p.CSS, &widgets)
+	if err != nil {
+		return p, mapErr(err)
+	}
+	p.WidgetsPublic = widgets == 1
+	if p.WidgetsPublic && p.BotID != "" {
+		p.Widgets, err = db.ListBotWidgets(ctx, p.BotID)
+	}
+	return p, err
 }

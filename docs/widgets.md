@@ -5,6 +5,32 @@ plain JSON, so it behaves the same in Node.js, Python, Go, Rust, Java, and Ruby.
 The panel renders known elements; bot code cannot inject HTML, scripts, CSS, or
 iframes into an operator's browser.
 
+## Publishing widgets on a Bot Site
+
+Widgets remain private until a developer enables **Publish bot widgets** in
+the bot's **Public page → Page Studio**. That switch exposes the validated
+declarative widgets, not raw analytics, command usage, events, logs or bot
+configuration. Turn it off to remove all widgets from the public page at once.
+
+The public page gives each widget stable styling hooks:
+
+```css
+/* One widget key. */
+[data-widget="gateway-latency"] {
+  grid-column: span 2;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Every metric widget. */
+.kind-metric .metric {
+  font-variant-numeric: tabular-nums;
+}
+```
+
+Add this under Page Studio's **Custom CSS**. For larger compositions, use the
+custom HTML section or switch the site to Custom files. Author HTML/CSS/scripts
+run on the separate Sites origin and are never injected into the panel.
+
 Send up to 48 widget changes in one telemetry request. A widget with the same
 `key` replaces its previous value. The dashboard returns up to 240 active
 widgets, organized into tabs by `group` and ordered by `position`.

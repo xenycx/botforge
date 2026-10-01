@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Icon, { type IconName } from '$lib/components/ui/Icon.svelte';
 	let query = $state('');
 	const sections = [
 		{ id:'version', title:'Version and implementation status', summary:'What this build contains and what comes next.', body:['This documentation describes BotForge 0.2.0 and the changes recorded under Unreleased in the changelog. The root VERSION file is the authoritative project version and the changelog records every notable release and in-progress change.','Version 0.2.0 added the in-house documentation, expanded widget dashboards and lifecycle, Discord bot avatars, protected Prometheus metrics, and TCP/HTTP health probes. The unreleased work adds team workspaces with administrator oversight, static site hosting with custom domains, publishing bots to GitHub, and appearance options including corner styles.','The remaining staged work is tracked in docs/implementation-status.md in the source distribution. Highest priority is removing Docker socket ownership from the panel through a narrow privileged botrunner service, followed by real egress, disk, IO, and bandwidth enforcement.'] },
@@ -6,9 +7,9 @@
 		{ id:'deploy', title:'Deployment and GitHub', summary:'Manual uploads, repositories, automatic deploys and pushing back.', body:['Manual projects can be edited in the browser or over SFTP. GitHub projects download a repository archive without installing git on the host.','Connect GitHub under Settings, link a repository in Deploy, select the branch and optional root directory, then deploy. Automatic deploys use a signed webhook.','A failed build keeps the previous generation available. Use operation history for the exact stage and output.'] },
 		{ id:'publish', title:'Publishing a bot to GitHub', summary:'Create a repository from a bot and push later changes.', body:['Deploy → Publish to GitHub creates a repository under your account or organization (private by default), pushes the bot’s files as the first commit and links the bot to it, optionally with auto-deploy. For a linked bot, Push to GitHub commits the current files to the linked branch.','Pushing uses your own GitHub connection with repository access and never force-pushes: if the branch moved on GitHub, the push stops and you deploy those changes first. With a linked folder, only that folder is replaced.','.gitignore files (root and nested) are honored. Dependencies, .git, panel metadata and .env files are always left out (.env.example is kept) and panel environment variables are never pushed. The dialog lists every file before anything is created. Limits: 5,000 files, 200 MiB, 25 MiB per file.'] },
 		{ id:'workspaces', title:'Workspaces and roles', summary:'Group bots and sites for a team.', body:['Every account has a Personal workspace; create team workspaces under Settings → Workspaces and add people by the email they sign in with. The sidebar switcher scopes the overview, Sites and new bots to one workspace.','Owner and Admin act as the owner of every bot and site in the workspace. Developer creates, deploys and operates bots and sites, edits files and environment variables, but cannot change resources, delete or share. Viewer only reads status and console output.','Per-bot sharing still adds access on top. Transferring a bot moves it into the new owner’s personal workspace. Administrators see every workspace, account, bot and recent deployment under Administration.'] },
-		{ id:'sites', title:'Static sites and domains', summary:'Host dashboards, docs and landing pages.', body:['When the administrator enables site hosting, Sites publishes static files at <name>.<sites domain>. Upload a ZIP of your built site (a single top folder such as dist/ is unwrapped) or deploy a GitHub branch that contains built files. Every publish is a new release; earlier ones can be served again instantly.','Sites are served by a separate listener on separate host names, never on the panel’s origin. Dotfiles such as .env are never served. Options: single-page application fallback, clean URLs, and a top-level 404.html.','Add a custom domain, create the TXT record _botforge-verify.<domain> it shows plus a CNAME (or A record) to this server, then check DNS. The domain is served only after verification; with Caddy’s on-demand TLS, certificates are requested only for verified names.'] },
+		{ id:'sites', title:'Bot Sites and public pages', summary:'A public home attached directly to each Discord bot.', body:['Open a bot’s Public page tab to create its one integrated site. Page Studio publishes a generated page with its own headline, introduction, theme, accent, custom HTML, custom CSS and an isolated live preview. Private telemetry remains under Private insights.','Switch the same address to Custom files for a complete HTML, CSS and JavaScript site. Site files is a private working draft: saving never changes production. Publish draft creates an immutable release, and older releases remain available for instant rollback.','Generated pages can expose validated declarative widgets only after a developer enables Publish bot widgets. Raw stats, command usage, events, logs, secrets, owner identity and deployment details are never part of the public page response.','Add a custom domain, create the TXT ownership record plus the shown CNAME or address record, then check DNS. The domain is served only after verification.'] },
 		{ id:'appearance', title:'Appearance', summary:'Theme, accent color and corners.', body:['Settings → Appearance chooses light, dark or system theme, one of twelve accent colors, and a corner style: Square (no rounding anywhere), Subtle, Default or Rounded. These preferences apply to the current browser.'] },
-		{ id:'widgets', title:'Dashboard widgets', summary:'Publish safe, grouped dashboards from any supported SDK.', body:['Send widgets in POST /api/v1/bot-telemetry or its WebSocket. Up to 48 widgets may be changed in one push and up to 240 active widgets are returned. Keys are upserted.','Kinds: metric, status, progress, text, chart, table, link, line, area, donut, gauge, heatmap, sparkline, kv, markdown, image, log and code. Bot content stays declarative: raw HTML, CSS and JavaScript are never executed.','Optional fields: group (tab name, 48 chars), span (1, 2 or 3 columns), min_height (0–800 px), position (0–1000), and ttl_seconds (30–604800). A widget older than five minutes is marked stale.','Remove widgets with {"unpublish":["widget-key"]} in telemetry, or DELETE /api/v1/bots/{bot_id}/widgets/{widget_key} as a full bot administrator.'] },
+		{ id:'widgets', title:'Dashboard and public widgets', summary:'One validated schema for private operations and opt-in public pages.', body:['Send widgets in POST /api/v1/bot-telemetry or its WebSocket. Up to 48 widgets may be changed in one push and up to 240 active widgets are returned. Keys are upserted.','Kinds: metric, status, progress, text, chart, table, link, line, area, donut, gauge, heatmap, sparkline, kv, markdown, image, log and code. Bot content stays declarative inside the operator panel.','Optional fields: group (tab name, 48 chars), span (1, 2 or 3 columns), min_height (0–800 px), position (0–1000), and ttl_seconds (30–604800). A widget older than five minutes is marked stale.','On a public Bot Site, custom CSS can target [data-widget="widget-key"] or a renderer class such as .kind-metric. Turn off Publish bot widgets to remove every widget from the public page immediately.'] },
 		{ id:'widget-data', title:'Widget data shapes', summary:'Payload conventions for every renderer.', body:['metric: {value, unit?, detail?, delta?}; status: {state: good|warn|bad|neutral, text}; progress/gauge: {value, max?, label?, unit?}.','chart/line/area/sparkline: {points:[{label,value}], unit?}; donut: {values:[{label,value}]}; heatmap: {cells:[{label,value}]}.','table: {columns:[string|{label}], rows:[[string|number|{label,url}]]}; kv: {items:[{key,value}]}; text/markdown/log: {text}; code: {code, language?}; image/link: {url, alt?/label?}.'] },
 		{ id:'telemetry', title:'Telemetry limits', summary:'Rates, validation and retention.', body:['The request body is at most 64 KiB. Each bot may push 60 times per minute. A named stat is stored at most once every 10 seconds.','Per push: 16 stats, 20 commands, 10 events, 48 widget updates and 48 unpublish keys. Widget data is valid non-null JSON up to 4096 bytes. Validation errors identify the offending field.','Retention is configured by the administrator from one hour to 365 days; the default is seven days. A bot also has a bounded telemetry row history.'] },
 		{ id:'health', title:'Health and alerts', summary:'Heartbeats, active probes, restart behavior and notifications.', body:['Every accepted telemetry push is a heartbeat. The optional ready boolean reports whether the bot considers its Discord connection ready.','TCP and HTTP probes check a published TCP port through host loopback. Configure their interval, timeout, thresholds and startup grace under Health & alerts. An unhealthy transition can replace a stuck container once without creating a rapid restart loop.','Restart policy can stop permanently or retry process failures with bounded exponential backoff. Health rules distinguish process state, SDK heartbeat and active probe state.','Use the diagnostics page for database, container runtime, storage and runner checks.'] },
@@ -18,21 +19,78 @@
 		{ id:'operations', title:'Operations guide', summary:'Install, update, diagnose and recover.', body:['Deploy with the provided container or systemd units, configure the public URL, and verify /api/v1/healthz and /api/v1/readyz.','Before upgrades, take and verify a backup. Review release notes, apply the new binary or image, and confirm the schema migration and readiness checks.','For recovery, preserve the database, workspace directory and encryption keys together. Without matching key material, sealed secrets cannot be recovered.'] }
 	];
 	const filtered = $derived(sections.filter((s)=>(s.title+' '+s.summary+' '+s.body.join(' ')).toLowerCase().includes(query.trim().toLowerCase())));
+	const iconFor = (id: string): IconName => ({ version:'commit', quickstart:'rocket', deploy:'github', publish:'upload', workspaces:'users', sites:'globe', appearance:'sun', widgets:'grid', 'widget-data':'code', telemetry:'activity', health:'shield', security:'key', backups:'archive', automation:'bolt', operations:'terminal' } as Record<string, IconName>)[id] ?? 'book';
 </script>
 
 <svelte:head><title>Documentation · BotForge</title><meta name="description" content="BotForge installation, deployment, dashboard widget, telemetry, security and operations documentation." /></svelte:head>
 
-<div class="mx-auto max-w-7xl px-5 py-8 lg:px-8">
-	<header class="border-b border-rule pb-7">
-		<a href="/" class="eyebrow">BotForge</a>
-		<h1 class="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Documentation</h1>
-		<p class="mt-2 max-w-2xl text-title text-muted">Run bots, ship safely, and build dashboards without leaving the panel.</p>
-		<label class="mt-5 block max-w-xl"><span class="sr-only">Search documentation</span><input class="field w-full" type="search" placeholder="Search deployment, widgets, backups…" bind:value={query} /></label>
+<div class="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+	<header class="relative overflow-hidden rounded-card bg-term px-6 py-10 text-term-ink sm:px-10 sm:py-14 lg:px-14">
+		<div class="pointer-events-none absolute -top-24 right-[-8rem] size-[28rem] rounded-pill bg-action/25 blur-3xl"></div>
+		<div class="relative grid items-end gap-10 lg:grid-cols-[minmax(0,1.25fr)_minmax(19rem,.75fr)]">
+			<div>
+				<a href="/" class="inline-flex items-center gap-2 text-small text-white/55"><Icon name="book" size={14} />BotForge field guide</a>
+				<h1 class="mt-7 max-w-[12ch] text-4xl font-semibold leading-[.98] tracking-[-.045em] sm:text-6xl">Build the bot. Operate it. Give it a public home.</h1>
+				<p class="mt-5 max-w-2xl text-base leading-7 text-white/60">Practical paths through deployment, Page Studio, public widgets, domains, team access and recovery—with the security boundary shown wherever it matters.</p>
+			</div>
+			<div class="rounded-tile border border-white/12 bg-white/6 p-4 backdrop-blur">
+				<p class="text-small text-white/50">Find a guide</p>
+				<label class="relative mt-2 block"><span class="sr-only">Search documentation</span><Icon name="search" size={15} class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-white/45" /><input class="field border-white/15 bg-black/20 pl-9 text-white placeholder:text-white/35" type="search" placeholder="Sites, widgets, restore…" bind:value={query} /></label>
+				<div class="mt-4 grid grid-cols-3 gap-px overflow-hidden rounded-control bg-white/10 text-center"><div class="bg-term/80 p-2"><strong class="block text-lg">6</strong><span class="text-[11px] text-white/45">runtimes</span></div><div class="bg-term/80 p-2"><strong class="block text-lg">18</strong><span class="text-[11px] text-white/45">widgets</span></div><div class="bg-term/80 p-2"><strong class="block text-lg">2</strong><span class="text-[11px] text-white/45">site modes</span></div></div>
+			</div>
+		</div>
 	</header>
-	<div class="mt-7 grid gap-8 lg:grid-cols-[15rem_minmax(0,1fr)]">
-		<aside><nav class="sticky top-5" aria-label="Documentation"><p class="eyebrow px-2">On this page</p><ul class="mt-2 grid gap-0.5">{#each filtered as s}<li><a class="side-link" href={'#'+s.id}>{s.title}</a></li>{/each}</ul><div class="mt-5 border-t border-rule-soft pt-4"><a class="link" href="/api/v1/automation/openapi.yaml">Automation OpenAPI</a></div></nav></aside>
-		<main class="min-w-0">
-			{#each filtered as section}<section id={section.id} class="scroll-mt-6 border-b border-rule-soft pb-8 pt-7 first:pt-0"><p class="eyebrow">{section.summary}</p><h2 class="mt-1 text-2xl font-semibold">{section.title}</h2><div class="mt-4 space-y-3 text-[15px] leading-7">{#each section.body as p}<p>{p}</p>{/each}</div>{#if section.id === 'widgets'}<pre class="mt-4 overflow-x-auto bg-term p-4 font-mono text-[12px] text-term-ink">{'{"widgets":[{"key":"latency","kind":"line","title":"Gateway latency","group":"Operations","span":2,"ttl_seconds":120,"data":{"unit":"ms","points":[{"label":"now","value":42}]}}]}'}</pre>{/if}</section>{:else}<div class="border border-rule-soft bg-panel p-8 text-center"><h2 class="text-title font-semibold">No matching documentation</h2><p class="mt-1 text-muted">Try a shorter search term.</p></div>{/each}
+
+	<div class="mt-7 grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
+		<aside>
+			<nav class="sticky top-5" aria-label="Documentation">
+				<p class="px-2 text-small font-semibold">Contents</p>
+				<ul class="mt-2 max-h-[calc(100dvh-9rem)] space-y-0.5 overflow-auto pr-1">{#each filtered as s}<li><a class="side-link flex items-center gap-2" href={'#'+s.id}><Icon name={iconFor(s.id)} size={13} class="text-muted" /><span class="truncate">{s.title}</span></a></li>{/each}</ul>
+				<div class="mt-5 border-t border-rule-soft px-2 pt-4"><a class="link inline-flex items-center gap-1.5" href="/api/v1/automation/openapi.yaml"><Icon name="code" size={13} />Automation OpenAPI</a></div>
+			</nav>
+		</aside>
+
+		<main class="min-w-0 space-y-5">
+			{#each filtered as section}
+				<section id={section.id} class="scroll-mt-5 overflow-hidden rounded-card border border-rule-soft bg-panel">
+					<header class="grid gap-3 border-b border-rule-soft bg-paper/40 px-5 py-5 sm:grid-cols-[3rem_minmax(0,1fr)] sm:px-7">
+						<span class="grid size-11 place-items-center rounded-tile border border-rule-soft bg-raised text-action"><Icon name={iconFor(section.id)} size={18} /></span>
+						<div><h2 class="text-2xl font-semibold tracking-tight">{section.title}</h2><p class="mt-0.5 text-muted">{section.summary}</p></div>
+					</header>
+
+					<div class="px-5 py-6 sm:px-7 sm:py-7">
+						{#if section.id === 'quickstart'}
+							<ol class="grid gap-px overflow-hidden rounded-tile border border-rule-soft bg-rule-soft sm:grid-cols-3">
+								{#each section.body as p, i}<li class="bg-raised p-4"><span class="grid size-7 place-items-center rounded-pill bg-action text-small font-semibold text-action-ink">{i + 1}</span><p class="mt-3 leading-6">{p}</p></li>{/each}
+							</ol>
+						{:else}
+							<div class="max-w-[78ch] space-y-3 text-[15px] leading-7">{#each section.body as p}<p>{p}</p>{/each}</div>
+						{/if}
+
+						{#if section.id === 'sites'}
+							<div class="mt-6 overflow-hidden rounded-tile border border-rule-soft">
+								<div class="grid items-stretch bg-rule-soft sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
+									<div class="bg-raised p-4"><Icon name="discord" size={18} class="text-action" /><strong class="mt-3 block">Bot</strong><span class="text-small text-muted">Publishes validated widgets</span></div><div class="hidden items-center bg-raised px-1 text-muted sm:flex">›</div>
+									<div class="bg-raised p-4"><Icon name="pencil" size={18} class="text-action" /><strong class="mt-3 block">Page Studio</strong><span class="text-small text-muted">Composes the public surface</span></div><div class="hidden items-center bg-raised px-1 text-muted sm:flex">›</div>
+									<div class="bg-raised p-4"><Icon name="globe" size={18} class="text-action" /><strong class="mt-3 block">Sites origin</strong><span class="text-small text-muted">Runs author HTML away from panel cookies</span></div>
+								</div>
+								<div class="border-t border-rule-soft bg-run/8 px-4 py-3 text-small text-run"><strong>Public:</strong> page copy, author HTML/CSS and opted-in widgets. <strong class="ml-2">Private:</strong> secrets, console, events, command analytics, people and deployments.</div>
+							</div>
+						{:else if section.id === 'widgets'}
+							<div class="mt-6 grid gap-3 sm:grid-cols-3">
+								<div class="rounded-tile border border-rule-soft bg-raised p-4"><p class="text-small text-muted">Gateway latency</p><p class="mt-2 text-3xl font-semibold">42 <small class="text-small text-muted">ms</small></p><div class="mt-3 flex h-8 items-end gap-1">{#each [35,52,41,68,55,76,62,84] as h}<i class="flex-1 bg-action/65" style={`height:${h}%`}></i>{/each}</div></div>
+								<div class="rounded-tile border border-rule-soft bg-raised p-4"><p class="text-small text-muted">Discord gateway</p><p class="mt-3 flex items-center gap-2 font-semibold"><span class="size-2 rounded-pill bg-run"></span>Connected</p><p class="mt-5 text-small text-muted">Updated 8 seconds ago</p></div>
+								<div class="rounded-tile border border-rule-soft bg-raised p-4"><p class="text-small text-muted">Queue</p><p class="mt-2 text-3xl font-semibold">68%</p><div class="mt-3 h-2 overflow-hidden rounded-pill bg-paper-2"><div class="h-full w-[68%] bg-action"></div></div></div>
+							</div>
+							<div class="mt-4 grid gap-3 lg:grid-cols-2"><div><p class="mb-1 text-small font-medium">Telemetry payload</p><pre class="max-h-72 overflow-auto rounded-tile bg-term p-4 font-mono text-[12px] leading-5 text-term-ink">{'{"widgets":[{"key":"latency","kind":"line","title":"Gateway latency","group":"Operations","span":2,"ttl_seconds":120,"data":{"unit":"ms","points":[{"label":"now","value":42}]}}]}'}</pre></div><div><p class="mb-1 text-small font-medium">Public-page CSS hook</p><pre class="max-h-72 overflow-auto rounded-tile bg-term p-4 font-mono text-[12px] leading-5 text-term-ink">{'[data-widget="latency"] {\n  grid-column: span 2;\n  border-color: var(--accent);\n}\n\n.kind-metric .metric {\n  font-variant-numeric: tabular-nums;\n}'}</pre></div></div>
+						{:else if section.id === 'security'}
+							<div class="mt-5 grid gap-3 sm:grid-cols-2"><div class="rounded-tile border border-run/30 bg-run/8 p-4"><strong class="flex items-center gap-2 text-run"><Icon name="shield" size={15} />Enforced now</strong><p class="mt-2 text-small leading-6">App authorization, separate Sites origin, non-root containers, read-only runtime, capability drops and resource limits.</p></div><div class="rounded-tile border border-warn/30 bg-warn/8 p-4"><strong class="flex items-center gap-2 text-warn"><Icon name="alert" size={15} />Host controls still required</strong><p class="mt-2 text-small leading-6">Egress policy, disk quotas, IO and bandwidth need kernel, filesystem or network enforcement outside stored configuration.</p></div></div>
+						{/if}
+					</div>
+				</section>
+			{:else}
+				<div class="rounded-card border border-rule-soft bg-panel p-10 text-center"><Icon name="search" size={24} class="mx-auto text-muted" /><h2 class="mt-3 text-title font-semibold">No matching documentation</h2><p class="mt-1 text-muted">Try a shorter search term or a feature name.</p></div>
+			{/each}
 		</main>
 	</div>
 </div>

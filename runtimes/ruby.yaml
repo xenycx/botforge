@@ -7,5 +7,10 @@ build_argv: [sh, -c, "bundle config set --local path vendor/bundle && bundle ins
 default_argv: [ruby, main.rb]
 allowed_commands: [ruby, bundle]
 env: {BUNDLE_APP_CONFIG: /workspace/.bundle, BUNDLE_PATH: /workspace/vendor/bundle}
+diagnostic_commands:
+  - [ruby, -c]
+  - [bundle, exec, rake, test]
+  - [bundle, exec, rspec]
+  - [bundle, exec, rubocop]
 defaults: {memory_bytes: 268435456, nano_cpus: 500000000, pids_limit: 128}
 min_memory_bytes: 67108864

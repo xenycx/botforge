@@ -21,6 +21,11 @@ items state exactly what remains.
 - [x] Static site hosting on a separate listener with ZIP and GitHub
   publishing, five immutable releases and rollback, SPA/clean-URL options and
   custom 404 pages (`docs/sites.md`).
+- [x] Integrated Bot Sites: one public site per Discord bot, an in-bot Page
+  Studio, generated public pages with custom HTML/CSS, explicit safe-widget
+  publication, and editable private site drafts that publish as immutable
+  releases. Enforcement: author code runs only on the separate Sites origin;
+  public page queries omit private analytics and operator/account data.
 - [x] Custom domains for sites with DNS TXT ownership verification and
   six-hourly re-checks. Enforcement: the sites listener serves a custom domain
   only after verification (application level). TLS is **not** terminated by
@@ -29,15 +34,24 @@ items state exactly what remains.
 - [x] Settings redesign (side-by-side sections, sticky navigation, folded
   password form), themed checkboxes/radios, accent-aware dark glows, and a
   corner-style preference including a fully square mode.
+- [x] Target-scoped AI operator with encrypted OpenAI-compatible providers,
+  private 90-day conversations, streamed tool records, Approval/Auto envelopes,
+  Risa/SearxNG research, secret redaction, revision-checked journaled changes
+  and undo, and direct-argv offline diagnostics. Enforcement: RBAC, approvals,
+  limits, protected paths and SSRF checks are application-level; resource,
+  mount, capability and network isolation are Docker-runtime-level. The
+  separate privileged `botrunner` daemon is not implemented (`docs/ai-operator.md`).
 
 Migrations added since 0.2.0 (the schema-version assertion in
-`internal/store/sqlite/db_test.go` is 26):
+`internal/store/sqlite/db_test.go` is 28):
 
 | Migration | Purpose |
 | --- | --- |
 | `0024_workspaces.sql` | Workspaces and members; personal workspace backfill; `bots.workspace_id` |
 | `0025_publish_operations.sql` | Rebuilds `operations` to allow the `publish` kind (rows preserved) |
 | `0026_static_sites.sql` | Sites, releases and custom domains |
+| `0027_bot_sites.sql` | One-to-one bot/site links, generated-page presentation, custom HTML/CSS and public-widget opt-in |
+| `0028_ai_operator.sql` | Encrypted provider profiles, target chats, runs, tools, change/undo snapshots and site-aware audit identity |
 
 Known gaps in this work:
 

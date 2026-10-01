@@ -23,15 +23,17 @@ These are per-browser preferences.
   values such as the token up front; review of memory, CPU and build memory.
 - **Bot page**: sticky status header with the exact lifecycle state and the
   next useful action, and sections grouped as Operate (Overview, Console,
-  Analytics, Health & alerts), Code (Files, Packages, Deployments), Configure
+  Public page, Health & alerts), Code (Files, Packages, Deployments), Configure
   (Environment, Startup, Network) and Manage (Backups, Schedules, Access,
   Settings). Unsaved edits are protected when navigating away.
 - **Activity** (`/activity`): work (builds, deployments, backups, restores) and
   changes (who changed what; names only, never values).
 - **Workspace switcher** (sidebar): scopes the overview, Sites and new bots to
   one workspace or shows all of them (`workspaces.md`).
-- **Sites** (`/sites`): static websites with releases, rollback and custom
-  domains, when hosting is enabled (`sites.md`).
+- **Public page** (inside each bot): Page Studio for a generated bot site,
+  opt-in public widgets, full site files, private insights and a cross-origin
+  preview. **Sites** (`/sites`) remains the workspace-wide inventory for sites,
+  releases, rollback and custom domains (`sites.md`).
 - **Settings**: profile; appearance; workspaces and members; connected
   accounts; Security (password, two-step sign-in, sessions); SFTP keys and
   automation tokens. Each page explains a setting beside its controls on wide
@@ -121,6 +123,11 @@ conditional on the file's revision: if SFTP, a deployment or another editor
 changed the file, the editor offers to download your version, load theirs or
 replace it deliberately, and a failed save keeps your text. While a deployment
 or restore replaces files, edits wait with a clear 409.
+
+Bot Sites use the same explorer and conflict-aware editor for a private site
+draft. Unlike bot files, a save never changes production: **Publish draft**
+creates and activates an immutable site release. Generated pages instead use
+structured Page Studio settings plus bounded custom HTML and CSS.
 
 ## Package manager
 
@@ -311,7 +318,7 @@ token. SFTP keys never work here and tokens never work for SFTP. See
 
 ## Bot analytics
 
-Generate a telemetry key in **Analytics** (stop the bot first; the key becomes
+Generate a telemetry key in **Public page → Private insights** (stop the bot first; the key becomes
 `BOTPANEL_TELEMETRY_KEY`). Bots push to `POST /api/v1/bot-telemetry` (or the
 WebSocket at `/api/v1/bot-telemetry/ws`) with `Authorization: Bearer <key>`:
 
@@ -352,3 +359,8 @@ re-encrypts every sealed value with the active key and can be re-run to
 continue; keep old key files while per-bot backups made before the reseal exist.
 `make release VERSION=x.y.z` builds Linux amd64/arm64 archives with
 `SHA256SUMS`.
+## AI operator
+
+Each bot and standalone site has a private operational AI workspace. See
+[AI operator](ai-operator.md) for providers, permissions, approval modes,
+research, limits, data boundaries, diagnostics and recovery behavior.

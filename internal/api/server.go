@@ -57,6 +57,7 @@ type Deps struct {
 	Health        *service.HealthService   // nil disables application health and alert rules
 	Settings      *service.SettingsService // nil disables the setup wizard and panel settings
 	Sites         *service.SiteService     // nil (or not started) disables static site hosting
+	AI            *service.AIService       // nil disables the AI operator
 	SetupCodeFile string                   // shown by the setup wizard
 	OnSetupDone   func()                   // called after the first administrator is created
 	Catalog       *runtimes.Catalog
@@ -114,6 +115,7 @@ type server struct {
 	health        *service.HealthService
 	settings      *service.SettingsService
 	sites         *service.SiteService
+	ai            *service.AIService
 	setupCodeFile string
 	onSetupDone   func()
 	statsLimit    *console.Limiter
@@ -184,7 +186,7 @@ func New(d Deps) *fiber.App {
 		return c.JSON(fiber.Map{"status": "ok", "checks": checks})
 	})
 	if d.Auth != nil && d.Bots != nil {
-		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, sites: d.Sites, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
+		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, sites: d.Sites, ai: d.AI, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
 			console: d.Console, consoleLimit: d.ConsoleLimit, baseCtx: d.BaseCtx, nodes: d.Nodes, files: d.Files, maxUpload: d.MaxUpload,
 			runnerReady: d.RunnerReady, buildMemory: d.BuildMemory, diagnostics: d.Diagnostics}
 		if s.buildMemory == 0 {
@@ -318,6 +320,9 @@ func (s *server) routes(v1 fiber.Router) {
 		s.automationRoutes(v1)
 	}
 	authed := v1.Group("", s.requireAuth, s.auditMW)
+	if s.ai != nil {
+		s.aiRoutes(authed)
+	}
 	registryLimit := limiter.New(limiter.Config{
 		Max: 60, Expiration: time.Minute,
 		KeyGenerator: func(c fiber.Ctx) string { return "reg:" + currentUser(c).ID },
@@ -391,12 +396,22 @@ func (s *server) routes(v1 fiber.Router) {
 
 	authed.Get("/sites-info", s.sitesInfo)
 	if s.sites.Enabled() {
+		authed.Get("/bots/:id/site", s.getBotSite)
+		authed.Post("/bots/:id/site", s.createBotSite)
 		authed.Get("/sites", s.listSites)
 		authed.Post("/sites", s.createSite)
 		authed.Get("/sites/:sid", s.getSite)
 		authed.Patch("/sites/:sid", s.patchSite)
 		authed.Delete("/sites/:sid", s.deleteSite)
 		authed.Post("/sites/:sid/upload", s.uploadSite)
+		authed.Get("/sites/:sid/files", s.listFiles)
+		authed.Get("/sites/:sid/files/content", s.readFile)
+		authed.Put("/sites/:sid/files/content", s.writeFile)
+		authed.Delete("/sites/:sid/files", s.deleteFile)
+		authed.Post("/sites/:sid/files/mkdir", s.mkdirFile)
+		authed.Post("/sites/:sid/files/move", s.moveFile)
+		authed.Post("/sites/:sid/files/extract", s.extractZip)
+		authed.Post("/sites/:sid/files/publish", s.publishSiteFiles)
 		authed.Post("/sites/:sid/deploy", s.deploySite)
 		authed.Post("/sites/:sid/releases/:rid/activate", s.activateRelease)
 		authed.Post("/sites/:sid/domains", s.addSiteDomain)

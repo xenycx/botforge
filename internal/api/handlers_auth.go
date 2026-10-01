@@ -65,7 +65,7 @@ func (s *server) me(c fiber.Ctx) error {
 			"runner": s.bots.Notifier != nil, "console": s.console != nil, "stats": s.stats != nil, "files": s.files != nil,
 			"deploy": s.deploy != nil && s.oauth.Enabled("github"), "backups": s.backups != nil, "analytics": s.analytics != nil, "sftp": s.sftp != nil,
 			"operations": s.ops != nil, "oauth": s.oauth.AnyEnabled(), "schedules": s.schedules != nil, "mfa": s.mfa != nil, "automation": s.tokens != nil, "health": s.health != nil,
-			"sites": s.sites.Enabled(), "workspaces": true,
+			"sites": s.sites.Enabled(), "workspaces": true, "ai": s.ai != nil,
 		}})
 }
 

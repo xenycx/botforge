@@ -23,6 +23,14 @@ build_argv:
     cp target/app.jar app.jar
 default_argv: [java, -XX:MaxRAMPercentage=60, -jar, app.jar]
 allowed_commands: [java]
+diagnostic_commands:
+  - [javac]
+  - [.maven/bin/mvn, test]
+  - [.maven/bin/mvn, verify]
+  - [./mvnw, test]
+  - [./mvnw, verify]
+  - [./gradlew, test]
+  - [./gradlew, check]
 # Leave room for metaspace/thread stacks/native memory beyond the heap.
 defaults: {memory_bytes: 536870912, nano_cpus: 1000000000, pids_limit: 256}
 min_memory_bytes: 268435456

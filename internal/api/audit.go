@@ -22,77 +22,91 @@ func param(n string) func(fiber.Ctx) string { return func(c fiber.Ctx) string { 
 func query(n string) func(fiber.Ctx) string { return func(c fiber.Ctx) string { return c.Query(n) } }
 
 var auditRoutes = map[string]auditRoute{
-	"POST /api/v1/bots":                              {"bot.create", nil},
-	"PATCH /api/v1/bots/:id":                         {"bot.update", nil},
-	"DELETE /api/v1/bots/:id":                        {"bot.delete", nil},
-	"POST /api/v1/bots/:id/start":                    {"bot.start", nil},
-	"POST /api/v1/bots/:id/stop":                     {"bot.stop", nil},
-	"POST /api/v1/bots/:id/restart":                  {"bot.restart", nil},
-	"POST /api/v1/bots/:id/kill":                     {"bot.kill", nil},
-	"PUT /api/v1/bots/:id/ports":                     {"bot.ports", nil},
-	"PUT /api/v1/bots/:id/env":                       {"env.set", envNames},
-	"POST /api/v1/bots/:id/env/:name/reveal":         {"env.reveal", param("name")},
-	"DELETE /api/v1/bots/:id/env/:name":              {"env.delete", param("name")},
-	"PUT /api/v1/bots/:id/files/content":             {"files.write", query("path")},
-	"DELETE /api/v1/bots/:id/files":                  {"files.delete", query("path")},
-	"POST /api/v1/bots/:id/files/mkdir":              {"files.mkdir", nil},
-	"POST /api/v1/bots/:id/files/move":               {"files.move", nil},
-	"POST /api/v1/bots/:id/files/extract":            {"files.extract", query("path")},
-	"PUT /api/v1/bots/:id/packages":                  {"packages.edit", nil},
-	"PUT /api/v1/bots/:id/github":                    {"deploy.link", nil},
-	"DELETE /api/v1/bots/:id/github":                 {"deploy.unlink", nil},
-	"POST /api/v1/bots/:id/github/deploy":            {"deploy.start", nil},
-	"POST /api/v1/bots/:id/backups":                  {"backup.create", nil},
-	"POST /api/v1/bots/:id/backups/:bid/restore":     {"backup.restore", param("bid")},
-	"DELETE /api/v1/bots/:id/backups/:bid":           {"backup.delete", param("bid")},
-	"PATCH /api/v1/bots/:id/backups/:bid":            {"backup.label", param("bid")},
-	"PUT /api/v1/bots/:id/users":                     {"access.grant", nil},
-	"POST /api/v1/bots/:id/invites":                  {"access.invite", nil},
-	"DELETE /api/v1/bots/:id/invites/:iid":           {"access.invite_revoke", param("iid")},
-	"POST /api/v1/invites/accept":                    {"access.invite_accept", nil},
-	"DELETE /api/v1/bots/:id/users/:uid":             {"access.revoke", param("uid")},
-	"POST /api/v1/bots/:id/telemetry-key":            {"telemetry.key", nil},
-	"DELETE /api/v1/bots/:id/telemetry-key":          {"telemetry.revoke", nil},
-	"POST /api/v1/bots/:id/schedules":                {"schedule.create", nil},
-	"PATCH /api/v1/bots/:id/schedules/:sid":          {"schedule.update", param("sid")},
-	"DELETE /api/v1/bots/:id/schedules/:sid":         {"schedule.delete", param("sid")},
-	"POST /api/v1/bots/:id/transfer":                 {"bot.transfer", nil},
-	"PUT /api/v1/bots/:id/alerts":                    {"bot.alerts", nil},
-	"PUT /api/v1/bots/:id/tags":                      {"bot.tags", nil},
-	"POST /api/v1/bots/batch":                        {"bot.batch", nil},
-	"POST /api/v1/me/password":                       {"account.password", nil},
-	"DELETE /api/v1/me/sessions/:sid":                {"account.session_revoke", nil},
-	"POST /api/v1/me/sessions/revoke-others":         {"account.sessions_revoke", nil},
-	"POST /api/v1/me/api-keys":                       {"account.key_create", nil},
-	"DELETE /api/v1/me/api-keys/:id":                 {"account.key_delete", nil},
-	"POST /api/v1/me/tokens":                         {"account.token_create", nil},
-	"DELETE /api/v1/me/tokens/:id":                   {"account.token_delete", nil},
-	"DELETE /api/v1/me/connections/:provider":        {"account.disconnect", param("provider")},
-	"POST /api/v1/me/mfa/enable":                     {"account.mfa_enable", nil},
-	"POST /api/v1/me/mfa/disable":                    {"account.mfa_disable", nil},
-	"POST /api/v1/users":                             {"admin.user_create", nil},
-	"PATCH /api/v1/users/:id":                        {"admin.user_update", param("id")},
-	"PUT /api/v1/admin/settings":                     {"admin.settings", nil},
-	"POST /api/v1/auth/logout":                       {"account.logout", nil},
-	"POST /api/v1/workspaces":                        {"workspace.create", bodyField("name")},
-	"PATCH /api/v1/workspaces/:wid":                  {"workspace.rename", param("wid")},
-	"DELETE /api/v1/workspaces/:wid":                 {"workspace.delete", param("wid")},
-	"PUT /api/v1/workspaces/:wid/members":            {"workspace.member_add", bodyField("email")},
-	"PATCH /api/v1/workspaces/:wid/members/:uid":     {"workspace.member_role", param("uid")},
-	"DELETE /api/v1/workspaces/:wid/members/:uid":    {"workspace.member_remove", param("uid")},
-	"PUT /api/v1/bots/:id/workspace":                 {"bot.move", bodyField("workspace_id")},
-	"POST /api/v1/bots/:id/github/publish":           {"deploy.publish", bodyField("name")},
-	"POST /api/v1/bots/:id/github/push":              {"deploy.push", nil},
-	"POST /api/v1/sites":                             {"site.create", bodyField("name")},
-	"PATCH /api/v1/sites/:sid":                       {"site.update", param("sid")},
-	"DELETE /api/v1/sites/:sid":                      {"site.delete", param("sid")},
-	"POST /api/v1/sites/:sid/upload":                 {"site.upload", param("sid")},
-	"POST /api/v1/sites/:sid/deploy":                 {"site.deploy", param("sid")},
-	"POST /api/v1/sites/:sid/releases/:rid/activate": {"site.rollback", param("rid")},
-	"POST /api/v1/sites/:sid/domains":                {"site.domain_add", bodyField("domain")},
-	"POST /api/v1/sites/:sid/domains/:domain/verify": {"site.domain_verify", param("domain")},
-	"DELETE /api/v1/sites/:sid/domains/:domain":      {"site.domain_remove", param("domain")},
-	"PATCH /api/v1/admin/sites/:sid":                 {"admin.site_update", param("sid")},
+	"POST /api/v1/bots":                                    {"bot.create", nil},
+	"PATCH /api/v1/bots/:id":                               {"bot.update", nil},
+	"DELETE /api/v1/bots/:id":                              {"bot.delete", nil},
+	"POST /api/v1/bots/:id/start":                          {"bot.start", nil},
+	"POST /api/v1/bots/:id/stop":                           {"bot.stop", nil},
+	"POST /api/v1/bots/:id/restart":                        {"bot.restart", nil},
+	"POST /api/v1/bots/:id/kill":                           {"bot.kill", nil},
+	"PUT /api/v1/bots/:id/ports":                           {"bot.ports", nil},
+	"PUT /api/v1/bots/:id/env":                             {"env.set", envNames},
+	"POST /api/v1/bots/:id/env/:name/reveal":               {"env.reveal", param("name")},
+	"DELETE /api/v1/bots/:id/env/:name":                    {"env.delete", param("name")},
+	"PUT /api/v1/bots/:id/files/content":                   {"files.write", query("path")},
+	"DELETE /api/v1/bots/:id/files":                        {"files.delete", query("path")},
+	"POST /api/v1/bots/:id/files/mkdir":                    {"files.mkdir", nil},
+	"POST /api/v1/bots/:id/files/move":                     {"files.move", nil},
+	"POST /api/v1/bots/:id/files/extract":                  {"files.extract", query("path")},
+	"PUT /api/v1/bots/:id/packages":                        {"packages.edit", nil},
+	"PUT /api/v1/bots/:id/github":                          {"deploy.link", nil},
+	"DELETE /api/v1/bots/:id/github":                       {"deploy.unlink", nil},
+	"POST /api/v1/bots/:id/github/deploy":                  {"deploy.start", nil},
+	"POST /api/v1/bots/:id/backups":                        {"backup.create", nil},
+	"POST /api/v1/bots/:id/backups/:bid/restore":           {"backup.restore", param("bid")},
+	"DELETE /api/v1/bots/:id/backups/:bid":                 {"backup.delete", param("bid")},
+	"PATCH /api/v1/bots/:id/backups/:bid":                  {"backup.label", param("bid")},
+	"PUT /api/v1/bots/:id/users":                           {"access.grant", nil},
+	"POST /api/v1/bots/:id/invites":                        {"access.invite", nil},
+	"DELETE /api/v1/bots/:id/invites/:iid":                 {"access.invite_revoke", param("iid")},
+	"POST /api/v1/invites/accept":                          {"access.invite_accept", nil},
+	"DELETE /api/v1/bots/:id/users/:uid":                   {"access.revoke", param("uid")},
+	"POST /api/v1/bots/:id/telemetry-key":                  {"telemetry.key", nil},
+	"DELETE /api/v1/bots/:id/telemetry-key":                {"telemetry.revoke", nil},
+	"POST /api/v1/bots/:id/schedules":                      {"schedule.create", nil},
+	"PATCH /api/v1/bots/:id/schedules/:sid":                {"schedule.update", param("sid")},
+	"DELETE /api/v1/bots/:id/schedules/:sid":               {"schedule.delete", param("sid")},
+	"POST /api/v1/bots/:id/transfer":                       {"bot.transfer", nil},
+	"PUT /api/v1/bots/:id/alerts":                          {"bot.alerts", nil},
+	"PUT /api/v1/bots/:id/tags":                            {"bot.tags", nil},
+	"POST /api/v1/bots/batch":                              {"bot.batch", nil},
+	"POST /api/v1/me/password":                             {"account.password", nil},
+	"DELETE /api/v1/me/sessions/:sid":                      {"account.session_revoke", nil},
+	"POST /api/v1/me/sessions/revoke-others":               {"account.sessions_revoke", nil},
+	"POST /api/v1/me/api-keys":                             {"account.key_create", nil},
+	"DELETE /api/v1/me/api-keys/:id":                       {"account.key_delete", nil},
+	"POST /api/v1/me/tokens":                               {"account.token_create", nil},
+	"DELETE /api/v1/me/tokens/:id":                         {"account.token_delete", nil},
+	"DELETE /api/v1/me/connections/:provider":              {"account.disconnect", param("provider")},
+	"POST /api/v1/me/mfa/enable":                           {"account.mfa_enable", nil},
+	"POST /api/v1/me/mfa/disable":                          {"account.mfa_disable", nil},
+	"POST /api/v1/users":                                   {"admin.user_create", nil},
+	"PATCH /api/v1/users/:id":                              {"admin.user_update", param("id")},
+	"PUT /api/v1/admin/settings":                           {"admin.settings", nil},
+	"POST /api/v1/auth/logout":                             {"account.logout", nil},
+	"POST /api/v1/workspaces":                              {"workspace.create", bodyField("name")},
+	"PATCH /api/v1/workspaces/:wid":                        {"workspace.rename", param("wid")},
+	"DELETE /api/v1/workspaces/:wid":                       {"workspace.delete", param("wid")},
+	"PUT /api/v1/workspaces/:wid/members":                  {"workspace.member_add", bodyField("email")},
+	"PATCH /api/v1/workspaces/:wid/members/:uid":           {"workspace.member_role", param("uid")},
+	"DELETE /api/v1/workspaces/:wid/members/:uid":          {"workspace.member_remove", param("uid")},
+	"PUT /api/v1/bots/:id/workspace":                       {"bot.move", bodyField("workspace_id")},
+	"POST /api/v1/bots/:id/github/publish":                 {"deploy.publish", bodyField("name")},
+	"POST /api/v1/bots/:id/github/push":                    {"deploy.push", nil},
+	"POST /api/v1/sites":                                   {"site.create", bodyField("name")},
+	"PATCH /api/v1/sites/:sid":                             {"site.update", param("sid")},
+	"DELETE /api/v1/sites/:sid":                            {"site.delete", param("sid")},
+	"POST /api/v1/sites/:sid/upload":                       {"site.upload", param("sid")},
+	"POST /api/v1/sites/:sid/deploy":                       {"site.deploy", param("sid")},
+	"POST /api/v1/sites/:sid/releases/:rid/activate":       {"site.rollback", param("rid")},
+	"POST /api/v1/sites/:sid/domains":                      {"site.domain_add", bodyField("domain")},
+	"POST /api/v1/sites/:sid/domains/:domain/verify":       {"site.domain_verify", param("domain")},
+	"DELETE /api/v1/sites/:sid/domains/:domain":            {"site.domain_remove", param("domain")},
+	"PATCH /api/v1/admin/sites/:sid":                       {"admin.site_update", param("sid")},
+	"POST /api/v1/admin/ai/providers":                      {"admin.ai_provider_create", nil},
+	"PATCH /api/v1/admin/ai/providers/:provider":           {"admin.ai_provider_update", param("provider")},
+	"DELETE /api/v1/admin/ai/providers/:provider":          {"admin.ai_provider_delete", param("provider")},
+	"POST /api/v1/admin/ai/providers/:provider/test":       {"admin.ai_provider_test", param("provider")},
+	"PUT /api/v1/admin/ai/search":                          {"admin.ai_search", nil},
+	"POST /api/v1/admin/ai/search/test":                    {"admin.ai_search_test", nil},
+	"POST /api/v1/bots/:id/ai/conversations":               {"ai.conversation_create", nil},
+	"POST /api/v1/sites/:sid/ai/conversations":             {"ai.conversation_create", nil},
+	"DELETE /api/v1/ai/conversations/:conversation":        {"ai.conversation_delete", param("conversation")},
+	"POST /api/v1/ai/conversations/:conversation/messages": {"ai.run_start", param("conversation")},
+	"POST /api/v1/ai/runs/:run/cancel":                     {"ai.run_cancel", param("run")},
+	"POST /api/v1/ai/tool-calls/:call/decision":            {"ai.approval", param("call")},
+	"POST /api/v1/ai/tool-calls/:call/secure-input":        {"ai.secure_input", secureInputNames},
+	"POST /api/v1/ai/change-sets/:change/revert":           {"ai.change_revert", param("change")},
 	// Automation API: the target names the token, so the record shows which
 	// credential acted.
 	"POST /api/v1/automation/bots/:id/start":   {"bot.start", viaToken},
@@ -100,6 +114,20 @@ var auditRoutes = map[string]auditRoute{
 	"POST /api/v1/automation/bots/:id/restart": {"bot.restart", viaToken},
 	"POST /api/v1/automation/bots/:id/deploy":  {"deploy.start", viaToken},
 	"POST /api/v1/automation/bots/:id/backups": {"backup.create", viaToken},
+}
+
+func secureInputNames(c fiber.Ctx) string {
+	var in struct {
+		Values map[string]json.RawMessage `json:"values"`
+	}
+	if json.Unmarshal(c.Body(), &in) != nil {
+		return ""
+	}
+	names := make([]string, 0, len(in.Values))
+	for n := range in.Values {
+		names = append(names, n)
+	}
+	return strings.Join(names, ", ")
 }
 
 // bodyField names a short, non-secret JSON string field of the request body
@@ -190,6 +218,14 @@ func (s *server) auditMW(c fiber.Ctx) error {
 		ev.BotID = &botID
 		if b, e := s.bots.Store.GetBot(c.Context(), botID); e == nil {
 			ev.BotName = strPtr(b.Name)
+		}
+	case strings.HasPrefix(c.Route().Path, "/api/v1/sites/:sid"):
+		siteID := strings.Clone(c.Params("sid"))
+		ev.SiteID = &siteID
+		if s.sites != nil {
+			if st, e := s.sites.Store.GetSite(c.Context(), siteID); e == nil {
+				ev.SiteName = strPtr(st.Name)
+			}
 		}
 	case r.action == "access.invite_accept" && outcome == "ok":
 		var inv struct {

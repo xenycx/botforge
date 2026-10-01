@@ -93,3 +93,7 @@ Leaving the variable empty keeps the endpoint disabled. Metrics cover process
 uptime and requests, database availability, aggregate bot lifecycle counts,
 and the latest node CPU, memory, disk, and running-bot gauges. Bot names, user
 IDs, and HTTP paths are deliberately not used as labels.
+AI provider and search credentials are normally entered in the encrypted
+Administration UI; never place them in bot environment variables. Diagnostic
+containers require the local Docker runner and remain offline. See
+[AI operator](ai-operator.md).

@@ -6,6 +6,37 @@ documentation, a landing page or an invite page. A site is a set of files
 server-side code and no build step on the server: build locally or in CI and
 publish the output.
 
+## Bot Sites and Page Studio
+
+Every Discord bot can own one site directly. Open the bot and choose **Public
+page**; the old Analytics destination now opens Page Studio by default, with
+private telemetry retained under **Private insights**.
+
+There are two presentation modes on the same address:
+
+* **Generated page** publishes immediately from structured settings: headline,
+  introduction, Midnight/Daylight/system theme, accent color, a custom HTML
+  section, custom CSS, and optional bot widgets.
+* **Custom files** serves an immutable release of HTML, CSS, JavaScript, images
+  and other static assets. **Site files** is a contained private draft with the
+  same explorer and conflict-aware editor used for bot files. Saving does not
+  alter the live site; **Publish draft** snapshots and activates it.
+
+Switching mode never removes the generated-page settings or file releases.
+Domains and the public address remain the same. Use **Domains & releases** from
+Page Studio for DNS, GitHub deployments, ZIP uploads, rollback and settings.
+
+Generated pages may expose declarative bot widgets, but the switch is off by
+default. Enabling it publishes only the widget title, layout and validated
+payload. It never publishes raw stat series, command names/counts, events,
+console output, environment variables, owner email, workspace membership or
+deployment details. Custom CSS can target one widget with
+`[data-widget="latency"]` or every renderer of a kind with `.kind-metric`.
+
+Custom HTML, CSS and scripts are powerful and are treated as author code. They
+run only on the separate Sites origin described below, including inside Page
+Studio's cross-origin preview. They never execute in the authenticated panel.
+
 ## How it is served (and why separately)
 
 Sites are served by a **separate listener** (`BOTPANEL_SITES_LISTEN`) that
@@ -25,7 +56,7 @@ user. On their own host names they cannot.
 * `GET` and `HEAD` only. HTML is sent with `Cache-Control: no-cache` so a new
   release shows immediately; other files are cacheable for an hour.
   Conditional and range requests are supported.
-* Options per site: **single-page application** (unknown paths serve
+* Options for custom-file sites: **single-page application** (unknown paths serve
   `/index.html`) and **clean URLs** (`/about` serves `about.html` or
   `about/index.html`; on by default). A `404.html` at the top level is used for
   missing pages.
@@ -119,6 +150,8 @@ sites down). Remove the domain to stop serving it.
 
 ## Publishing
 
+* **Site files**: use the private draft editor, then publish it. Each publish
+  is a new immutable release; partial edits never reach visitors.
 * **ZIP upload** (drag and drop on the site page, or
   `POST /api/v1/sites/{id}/upload` with the archive as the body). A single
   top-level folder such as `dist/` is unwrapped. The archive is validated and
@@ -153,11 +186,14 @@ Uploaded content is not scanned for malware. These are listed in
 | Method and path | Purpose |
 | --- | --- |
 | `GET /sites-info` | whether hosting is on and how addresses look |
-| `GET /sites`, `POST /sites` `{name, slug?, workspace_id?, spa?}` | list and create |
+| `GET /bots/{bot}/site`, `POST /bots/{bot}/site` `{slug?}` | get or create a bot's integrated site |
+| `GET /sites`, `POST /sites` `{name, slug?, workspace_id?, spa?}` | list and create standalone sites |
 | `GET /sites/{id}` | site, role, domains with DNS records, releases, GitHub deploy state |
-| `PATCH /sites/{id}` `{name?, spa?, clean_urls?, workspace_id?, repo?}` | settings; `repo` is `{full_name, branch, root_dir}` or `{clear: true}` |
+| `PATCH /sites/{id}` | site, generated-page, privacy, mode and repository settings |
 | `DELETE /sites/{id}` | delete with every release and domain (workspace admin) |
 | `POST /sites/{id}/upload` | publish a ZIP (raw body) |
+| `GET/PUT/DELETE /sites/{id}/files...` | list, read, edit, move, extract and delete private draft files |
+| `POST /sites/{id}/files/publish` | snapshot and activate the private draft |
 | `POST /sites/{id}/deploy` | deploy the linked branch head (background) |
 | `POST /sites/{id}/releases/{release}/activate` | serve an earlier release |
 | `POST /sites/{id}/domains` `{domain}` | add a custom domain |

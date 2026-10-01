@@ -2,6 +2,7 @@ package service
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -30,6 +31,7 @@ import (
 type SiteStore interface {
 	CreateSite(ctx context.Context, s domain.Site) error
 	GetSite(ctx context.Context, id string) (domain.Site, error)
+	GetSiteForBot(ctx context.Context, botID string) (domain.Site, error)
 	ListSitesForUser(ctx context.Context, userID string) ([]domain.Site, error)
 	ListAllSites(ctx context.Context) ([]domain.Site, error)
 	ListWorkspaceSites(ctx context.Context, workspaceID string) ([]domain.Site, error)
@@ -48,6 +50,7 @@ type SiteStore interface {
 	RecordDomainCheck(ctx context.Context, name string, verifiedAt *int64, errMsg *string, nowMS int64) error
 	DeleteDomain(ctx context.Context, siteID, name string) error
 	SiteRoutes(ctx context.Context) (bySlug, byDomain map[string]domain.SiteRoute, err error)
+	PublicSitePage(ctx context.Context, siteID string) (domain.PublicSitePage, error)
 }
 
 // TXTResolver looks up DNS TXT records (net.Resolver satisfies it).
@@ -83,6 +86,7 @@ type SiteService struct {
 	Now        func() time.Time
 
 	root    *filesystem.Manager
+	drafts  *filesystem.Manager
 	baseCtx context.Context
 	wg      sync.WaitGroup
 
@@ -90,8 +94,9 @@ type SiteService struct {
 	bySlug   map[string]domain.SiteRoute
 	byDomain map[string]domain.SiteRoute
 
-	jobMu sync.Mutex
-	jobs  map[string]*SiteJob
+	jobMu   sync.Mutex
+	jobs    map[string]*SiteJob
+	draftMu sync.Mutex
 }
 
 // SiteJob is the state of a site's GitHub deployment (in memory).
@@ -124,6 +129,10 @@ func (s *SiteService) Start(ctx context.Context) error {
 		return fmt.Errorf("sites directory: %w", err)
 	}
 	s.root, s.baseCtx = m, ctx
+	s.drafts, err = filesystem.NewManager(filepath.Join(s.Dir, "drafts"))
+	if err != nil {
+		return fmt.Errorf("site drafts directory: %w", err)
+	}
 	s.sweep(ctx)
 	if err := s.Reload(ctx); err != nil {
 		return err
@@ -353,6 +362,12 @@ func (s *SiteService) requireSite(ctx context.Context, actor domain.User, id, mi
 	return st, role, nil
 }
 
+// Authorize exposes the same site-role check to trusted subsystems such as the
+// AI operator. HTTP handlers must not duplicate or weaken this boundary.
+func (s *SiteService) Authorize(ctx context.Context, actor domain.User, id, minRole string) (domain.Site, string, error) {
+	return s.requireSite(ctx, actor, id, minRole)
+}
+
 // ---- reading ----
 
 // SiteDetail is everything the site page shows.
@@ -426,6 +441,8 @@ type CreateSiteInput struct {
 	Slug        string
 	WorkspaceID string
 	SPA         bool
+	BotID       string // optional: creates the one public page attached to this bot
+	Mode        string // files (default) | page
 }
 
 func slugFrom(name string) string {
@@ -455,8 +472,23 @@ func (s *SiteService) Create(ctx context.Context, actor domain.User, in CreateSi
 	if err != nil {
 		return domain.Site{}, err
 	}
-	wsID, err := s.Bots.creatableWorkspace(ctx, actor, in.WorkspaceID)
-	if err != nil {
+	wsID := ""
+	var botID *string
+	if in.BotID != "" {
+		b, e := s.Bots.Authorize(ctx, actor, in.BotID, domain.PermEditFiles)
+		if e != nil {
+			return domain.Site{}, e
+		}
+		wsID, botID = b.WorkspaceID, &b.ID
+		if in.WorkspaceID != "" && in.WorkspaceID != wsID {
+			return domain.Site{}, domain.Invalid("a bot page must stay in the bot's workspace")
+		}
+		if _, e := s.Store.GetSiteForBot(ctx, b.ID); e == nil {
+			return domain.Site{}, domain.Invalid("this bot already has a public page")
+		} else if !errors.Is(e, domain.ErrNotFound) {
+			return domain.Site{}, e
+		}
+	} else if wsID, err = s.Bots.creatableWorkspace(ctx, actor, in.WorkspaceID); err != nil {
 		return domain.Site{}, err
 	}
 	if s.MaxPerUser > 0 && !actor.IsAdmin() {
@@ -479,7 +511,18 @@ func (s *SiteService) Create(ctx context.Context, actor domain.User, in CreateSi
 		return domain.Site{}, domain.Invalid("that address is reserved; choose another")
 	}
 	now := s.now().UnixMilli()
-	st := domain.Site{ID: uuid.NewString(), WorkspaceID: wsID, OwnerID: actor.ID, Name: name, Slug: slug, SPA: in.SPA, CleanURLs: true,
+	mode := in.Mode
+	if mode == "" {
+		mode = "files"
+	}
+	if mode != "files" && mode != "page" {
+		return domain.Site{}, domain.Invalid("site mode must be page or files")
+	}
+	if mode == "page" && botID == nil {
+		return domain.Site{}, domain.Invalid("a generated public page must be attached to a bot")
+	}
+	st := domain.Site{ID: uuid.NewString(), WorkspaceID: wsID, OwnerID: actor.ID, BotID: botID, Name: name, Slug: slug, SPA: in.SPA, CleanURLs: true,
+		Mode: mode, PageTitle: name, PageDescription: "A Discord community powered by " + name + ".", PageTheme: "midnight", PageAccent: "#5865f2",
 		CreatedAtMS: now, UpdatedAtMS: now}
 	for attempt := 0; ; attempt++ {
 		err = s.Store.CreateSite(ctx, st)
@@ -512,11 +555,32 @@ type RepoInput struct {
 
 // UpdateSiteInput is a partial change; nil fields are unchanged.
 type UpdateSiteInput struct {
-	Name        *string
-	SPA         *bool
-	CleanURLs   *bool
-	WorkspaceID *string
-	Repo        *RepoInput
+	Name            *string
+	SPA             *bool
+	CleanURLs       *bool
+	WorkspaceID     *string
+	Repo            *RepoInput
+	Mode            *string
+	PageTitle       *string
+	PageDescription *string
+	PageTheme       *string
+	PageAccent      *string
+	PageHTML        *string
+	PageCSS         *string
+	WidgetsPublic   *bool
+}
+
+var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func cleanPageText(v string, max int, field string) (string, error) {
+	v = strings.TrimSpace(v)
+	if len(v) > max {
+		return "", domain.Invalid(fmt.Sprintf("%s must be at most %d characters", field, max))
+	}
+	if strings.ContainsRune(v, 0) {
+		return "", domain.Invalid(field + " contains an invalid character")
+	}
+	return v, nil
 }
 
 // Update changes a site's settings (developer and up; moving to another
@@ -536,6 +600,50 @@ func (s *SiteService) Update(ctx context.Context, actor domain.User, id string, 
 	}
 	if in.CleanURLs != nil {
 		st.CleanURLs = *in.CleanURLs
+	}
+	if in.Mode != nil {
+		if *in.Mode != "files" && *in.Mode != "page" {
+			return domain.Site{}, domain.Invalid("site mode must be page or files")
+		}
+		if *in.Mode == "page" && st.BotID == nil {
+			return domain.Site{}, domain.Invalid("only a bot-linked site can use page mode")
+		}
+		st.Mode = *in.Mode
+	}
+	if in.PageTitle != nil {
+		if st.PageTitle, err = cleanPageText(*in.PageTitle, 80, "page title"); err != nil {
+			return domain.Site{}, err
+		}
+	}
+	if in.PageDescription != nil {
+		if st.PageDescription, err = cleanPageText(*in.PageDescription, 500, "page description"); err != nil {
+			return domain.Site{}, err
+		}
+	}
+	if in.PageTheme != nil {
+		if *in.PageTheme != "midnight" && *in.PageTheme != "daylight" && *in.PageTheme != "system" {
+			return domain.Site{}, domain.Invalid("page theme must be midnight, daylight, or system")
+		}
+		st.PageTheme = *in.PageTheme
+	}
+	if in.PageAccent != nil {
+		if !hexColorRe.MatchString(*in.PageAccent) {
+			return domain.Site{}, domain.Invalid("page accent must be a six-digit hex color")
+		}
+		st.PageAccent = strings.ToLower(*in.PageAccent)
+	}
+	if in.PageHTML != nil {
+		if st.PageHTML, err = cleanPageText(*in.PageHTML, 65536, "custom HTML"); err != nil {
+			return domain.Site{}, err
+		}
+	}
+	if in.PageCSS != nil {
+		if st.PageCSS, err = cleanPageText(*in.PageCSS, 32768, "custom CSS"); err != nil {
+			return domain.Site{}, err
+		}
+	}
+	if in.WidgetsPublic != nil {
+		st.WidgetsPublic = *in.WidgetsPublic
 	}
 	if in.WorkspaceID != nil && *in.WorkspaceID != st.WorkspaceID {
 		if domain.WorkspaceRoleRank(role) < domain.WorkspaceRoleRank(domain.WorkspaceAdmin) {
@@ -558,6 +666,25 @@ func (s *SiteService) Update(ctx context.Context, actor domain.User, id string, 
 	}
 	s.reloadSoon()
 	return s.Store.GetSite(ctx, id)
+}
+
+// GetForBot returns a bot's attached site to anyone who may view that bot.
+// Absence is returned as ErrNotFound so the UI can offer creation.
+func (s *SiteService) GetForBot(ctx context.Context, actor domain.User, botID string) (SiteDetail, error) {
+	if _, err := s.Bots.Authorize(ctx, actor, botID, domain.PermViewConsole); err != nil {
+		return SiteDetail{}, err
+	}
+	st, err := s.Store.GetSiteForBot(ctx, botID)
+	if err != nil {
+		return SiteDetail{}, err
+	}
+	return s.Get(ctx, actor, st.ID)
+}
+
+// PublicPage returns the anonymous, deliberately redacted page model used by
+// the separate sites listener.
+func (s *SiteService) PublicPage(ctx context.Context, siteID string) (domain.PublicSitePage, error) {
+	return s.Store.PublicSitePage(ctx, siteID)
 }
 
 // linkRepo validates a repository link with the actor's GitHub access (a
@@ -608,7 +735,114 @@ func (s *SiteService) Delete(ctx context.Context, actor domain.User, id string) 
 	if err := s.root.Remove(id); err != nil {
 		s.warn("remove site files", err)
 	}
+	if s.drafts != nil {
+		_ = s.drafts.Remove(id)
+	}
 	return nil
+}
+
+// Draft opens an editable, contained file workspace for a site. The first
+// visit seeds it from the serving release; if the site is empty it starts with
+// a small, useful index page. Draft changes are private until PublishDraft.
+func (s *SiteService) Draft(ctx context.Context, actor domain.User, id string) (*filesystem.Workspace, error) {
+	st, _, err := s.requireSite(ctx, actor, id, domain.WorkspaceDeveloper)
+	if err != nil {
+		return nil, err
+	}
+	if s.drafts == nil {
+		return nil, domain.Invalid("site file editing is not available")
+	}
+	s.draftMu.Lock()
+	defer s.draftMu.Unlock()
+	if w, err := s.drafts.Open(id); err == nil {
+		return w, nil
+	}
+	if err := s.drafts.Create(id); err != nil {
+		if w, openErr := s.drafts.Open(id); openErr == nil {
+			return w, nil
+		}
+		return nil, err
+	}
+	dst, err := s.drafts.Open(id)
+	if err != nil {
+		return nil, err
+	}
+	if st.CurrentRelease == nil {
+		seed := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + htmlEscape(st.Name) + `</title><link rel="stylesheet" href="styles.css"></head><body><main><h1>` + htmlEscape(st.Name) + `</h1><p>Your site is ready to shape.</p></main></body></html>`
+		if err := dst.Write("index.html", bytes.NewBufferString(seed), 1<<20); err != nil {
+			dst.Close()
+			_ = s.drafts.Remove(id)
+			return nil, err
+		}
+		_ = dst.Write("styles.css", bytes.NewBufferString("body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.5 system-ui;background:#0d1220;color:#f4f7ff}main{max-width:42rem;padding:2rem}h1{font-size:clamp(3rem,10vw,7rem);line-height:.9}"), 1<<20)
+		return dst, nil
+	}
+	if err := s.copyReleaseToDraft(st.ID, *st.CurrentRelease, dst); err != nil {
+		dst.Close()
+		_ = s.drafts.Remove(id)
+		return nil, err
+	}
+	return dst, nil
+}
+
+func htmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
+	return r.Replace(s)
+}
+
+func (s *SiteService) copyReleaseToDraft(siteID, releaseID string, dst *filesystem.Workspace) error {
+	m, err := filesystem.NewManager(filepath.Join(s.Dir, siteID))
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	src, err := m.Open(releaseID)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	_, lim := s.limits()
+	var buf bytes.Buffer
+	if _, _, err := src.WriteTarGz(&buf, nil, lim); err != nil {
+		return err
+	}
+	_, err = dst.RestoreTarGz(&buf, lim)
+	return err
+}
+
+// PublishDraft snapshots the private editable workspace into a new immutable
+// release and switches the live site atomically.
+func (s *SiteService) PublishDraft(ctx context.Context, actor domain.User, id string) (domain.SiteRelease, error) {
+	st, _, err := s.requireSite(ctx, actor, id, domain.WorkspaceDeveloper)
+	if err != nil {
+		return domain.SiteRelease{}, err
+	}
+	draft, err := s.Draft(ctx, actor, id)
+	if err != nil {
+		return domain.SiteRelease{}, err
+	}
+	defer draft.Close()
+	rel, dst, done, err := s.newRelease(id)
+	if err != nil {
+		return domain.SiteRelease{}, err
+	}
+	ok := false
+	defer func() { done(ok) }()
+	_, lim := s.limits()
+	var buf bytes.Buffer
+	if _, _, err := draft.WriteTarGz(&buf, nil, lim); err != nil {
+		return domain.SiteRelease{}, err
+	}
+	if _, err := dst.RestoreTarGz(&buf, lim); err != nil {
+		return domain.SiteRelease{}, err
+	}
+	label := "File editor"
+	r, err := s.finish(ctx, st, rel, dst, "upload", &label, &actor.ID)
+	if err != nil {
+		return domain.SiteRelease{}, err
+	}
+	ok = true
+	return r, nil
 }
 
 // SetDisabled suspends or restores a site (panel administrators only).

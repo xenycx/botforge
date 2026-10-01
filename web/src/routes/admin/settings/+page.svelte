@@ -7,6 +7,7 @@
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import ProviderSetup from '$lib/components/ProviderSetup.svelte';
+	import AISettings from '$lib/components/AISettings.svelte';
 
 	type View = {
 		public_url: string;
@@ -137,4 +138,5 @@
 
 		<div class="sticky bottom-4 flex justify-end"><button class="btn btn-primary shadow-overlay" disabled={saving}>{saving ? 'Saving…' : 'Save and apply'}</button></div>
 	</form>
+	<div class="mt-8 grid w-full min-w-0 max-w-3xl gap-6"><AISettings /></div>
 {/if}

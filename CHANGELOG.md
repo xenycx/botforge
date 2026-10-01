@@ -8,6 +8,24 @@ authoritative current version.
 
 ### Added
 
+- AI Operator incident workspaces for bots and sites, with encrypted
+  OpenAI-compatible provider profiles (DeepSeek preset), configurable
+  Risa/SearxNG research, private retained chats, streamed tool activity,
+  Approval and bounded Auto repair modes, secure environment input, atomic
+  revision-checked file changes with undo, and isolated offline diagnostics.
+
+- Bot Sites: every Discord bot can now create one integrated public page from
+  its **Public page** tab. Page Studio controls the headline, introduction,
+  theme, accent, custom HTML and custom CSS; developers may explicitly publish
+  safe declarative bot widgets while raw analytics, command usage, events,
+  logs, configuration and account identity remain private.
+- Site file workspaces: edit HTML, CSS, JavaScript and assets with the same
+  explorer/editor experience as bot files. Changes stay in a private draft
+  until **Publish draft** creates and activates an immutable release, so the
+  normal release history and rollback workflow still applies.
+- Generated bot pages and full custom-file sites can share the same address,
+  domains and release history and switch modes without deleting either body of
+  work. Widget markup exposes stable `data-widget` and `kind-*` CSS hooks.
 - Team workspaces. Every account now has a personal workspace, and anyone can
   create team workspaces with owner, admin, developer, and viewer roles that
   apply to every bot and site in them, on top of per-bot sharing. A sidebar
@@ -39,6 +57,12 @@ authoritative current version.
 
 ### Changed
 
+- Renamed the bot Analytics tab to **Public page** and made Page Studio its
+  default surface. Private telemetry, command activity, events and SDK setup
+  remain available under **Private insights** in that tab.
+- Reworked the in-product documentation into a visual guide with feature
+  diagrams, callouts, runnable payload examples, privacy boundaries and a
+  dedicated Bot Sites authoring flow.
 - Redesigned the Settings pages: each setting's explanation sits beside its
   controls on wide screens and above them on narrow ones, the section
   navigation stays in view while scrolling, the password form is folded until
@@ -67,6 +91,14 @@ authoritative current version.
 
 ### Security
 
+- AI tools reauthorize every action, redact configured secret values, exclude
+  credential paths, reject SSRF and shell execution, and run diagnostics in
+  restricted Docker containers mounting only a private safe snapshot. The
+  model receives environment names but never their values.
+
+- Author HTML, CSS and scripts for generated bot pages execute only on the
+  separate Sites origin. The panel preview is a cross-origin frame, and public
+  widget publication is off by default and never includes private analytics.
 - Site files never share the panel's origin; configurations where the panel
   could be addressed as a site host are refused at startup, and in production
   the panel's host may not be the sites domain itself.

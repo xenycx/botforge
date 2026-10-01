@@ -10,6 +10,11 @@ build_argv:
 default_argv: [./app]
 allow_workspace_binary: true
 env: {CARGO_HOME: /workspace/.cargo}
+diagnostic_commands:
+  - [cargo, check]
+  - [cargo, test]
+  - [cargo, clippy]
+  - [cargo, fmt, --check]
 defaults: {memory_bytes: 134217728, nano_cpus: 500000000, pids_limit: 128}
 min_memory_bytes: 33554432
 # Compiling serenity/poise needs about 3 GiB of real memory (rustc is SIGKILLed at

@@ -10,5 +10,12 @@ build_argv:
 default_argv: [node, index.js]
 allowed_commands: [node, npm, npx]
 env: {NODE_ENV: production}
+diagnostic_commands:
+  - [node, --check]
+  - [npm, test]
+  - [npm, run, test]
+  - [npm, run, build]
+  - [npm, run, lint]
+  - [npm, run, typecheck]
 defaults: {memory_bytes: 268435456, nano_cpus: 500000000, pids_limit: 128}
 min_memory_bytes: 67108864

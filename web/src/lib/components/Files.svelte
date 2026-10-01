@@ -10,7 +10,13 @@
 	import Menu from '$lib/components/ui/Menu.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 
-	let { botId, running }: { botId: string; running: boolean } = $props();
+	let {
+		botId = '',
+		running = false,
+		basePath = '',
+		rootLabel = 'workspace',
+		saveNote = ''
+	}: { botId?: string; running?: boolean; basePath?: string; rootLabel?: string; saveNote?: string } = $props();
 
 	let cwd = $state('');
 	let entries = $state<FileEntry[] | null>(null);
@@ -31,7 +37,7 @@
 	type Upload = { name: string; progress: number; error?: string; ctrl: AbortController };
 	let uploads = $state<Upload[]>([]);
 
-	const base = (id: string) => `/bots/${id}/files`;
+	const base = (id: string) => basePath || `/bots/${id}/files`;
 	const q = (p: string) => encodeURIComponent(p);
 	const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 	const err = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
@@ -136,7 +142,7 @@
 			etag = await putText(`${base(botId)}/content?path=${q(path)}`, text, { ifMatch: force ? null : etag });
 			saved = text;
 			dirty = editor?.getText() !== saved;
-			toast(running ? `Saved ${path}. Restart the bot to use it.` : `Saved ${path}`);
+			toast(saveNote ? `Saved ${path}. ${saveNote}` : running ? `Saved ${path}. Restart the bot to use it.` : `Saved ${path}`);
 			return true;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 412) return await conflict(path, text);
@@ -292,7 +298,7 @@
 		</div>
 
 		<nav class="mt-3 flex min-w-0 flex-wrap items-center gap-0.5 text-small" aria-label="Folder">
-			<button class="rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {cwd ? 'text-action' : 'font-semibold'}" onclick={() => list('')} aria-current={cwd ? undefined : 'location'}>workspace</button>
+			<button class="rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {cwd ? 'text-action' : 'font-semibold'}" onclick={() => list('')} aria-current={cwd ? undefined : 'location'}>{rootLabel}</button>
 			{#each crumbs as c, i (c.path)}
 				<Icon name="chevronRight" size={12} class="text-muted" />
 				<button class="max-w-40 truncate rounded-control px-1 py-0.5 font-mono hover:bg-paper-2 {i === crumbs.length - 1 ? 'font-semibold' : 'text-action'}" onclick={() => list(c.path)} aria-current={i === crumbs.length - 1 ? 'location' : undefined}>{c.name}</button>
@@ -376,7 +382,7 @@
 			{:else}
 				{#if loadingFile}<p class="py-2 text-muted">Opening…</p>{/if}
 				<div bind:this={host} class="h-[max(22rem,calc(100dvh-22rem))] overflow-hidden border border-rule-soft"></div>
-				{#if running && !dirty}<p class="mt-2 text-small text-muted">Saved changes apply after the bot restarts.</p>{/if}
+				{#if saveNote && !dirty}<p class="mt-2 text-small text-muted">{saveNote}</p>{:else if running && !dirty}<p class="mt-2 text-small text-muted">Saved changes apply after the bot restarts.</p>{/if}
 			{/if}
 		{:else}
 			<div class="grid h-full min-h-60 place-items-center border border-dashed border-rule p-6 text-center text-muted">

@@ -16,7 +16,8 @@ the guides below.
 
 - [Features](features.md) — supported behavior and limits
 - [Workspaces](workspaces.md) — teams, roles, and administrator oversight
-- [Static sites](sites.md) — hosting, custom domains, DNS, and TLS through the proxy
+- [Bot Sites and static hosting](sites.md) — Page Studio, editable drafts, custom domains, DNS, and TLS through the proxy
+- [AI operator](ai-operator.md) — providers, modes, tools, approvals, research, secret boundaries, diagnostics, and recovery
 - [Custom dashboard widgets](widgets.md) — one JSON API for all supported languages
 - [Automation API](automation.md) — scoped tokens and examples
 - [Architecture](architecture.md) — state model and runner design

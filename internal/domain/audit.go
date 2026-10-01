@@ -8,6 +8,8 @@ type AuditEvent struct {
 	ActorLabel    *string
 	BotID         *string
 	BotName       *string
+	SiteID        *string
+	SiteName      *string
 	SubjectUserID *string // the account an account-level event concerns
 	Action        string  // e.g. bot.start, env.set, files.write
 	Target        *string // a name or path, never a value

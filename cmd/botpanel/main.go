@@ -521,6 +521,8 @@ func serve(log *slog.Logger) error {
 	var runnerStatus func(context.Context) (runner.Status, bool)
 	var runnerDone chan struct{}
 	var dk *docker.Adapter
+	var installID string
+	var aiDiagnostic service.DiagnosticRunner
 	if cfg.RunnerMode == config.RunnerLocal {
 		var err error
 		dk, err = docker.New(cfg.DockerHost)
@@ -528,7 +530,7 @@ func serve(log *slog.Logger) error {
 			return fmt.Errorf("docker client: %w", err)
 		}
 		defer dk.Close()
-		installID, err := db.InstallationID(ctx, time.Now().UnixMilli())
+		installID, err = db.InstallationID(ctx, time.Now().UnixMilli())
 		if err != nil {
 			return fmt.Errorf("installation identity: %w", err)
 		}
@@ -549,6 +551,9 @@ func serve(log *slog.Logger) error {
 				log.Error("runner stopped", "err", err)
 			}
 		}()
+		aiDiagnostic = &runner.Diagnostic{Docker: dk, Files: wsm, Catalog: catalog, ScratchRoot: filepath.Join(filepath.Dir(cfg.DBPath), "ai-scratch"),
+			User: cfg.ContainerUser, InstallID: installID, NodeID: domain.LocalNodeID, Timeout: 10 * time.Minute,
+			MemoryBytes: 768 << 20, NanoCPUs: 1e9, PidsLimit: 256, TmpfsBytes: 128 << 20}
 	}
 
 	go pruneSessions(ctx, log, db)
@@ -639,11 +644,13 @@ func serve(log *slog.Logger) error {
 	dsrc := diagSources{cfg: cfg, db: db, files: wsm, catalog: catalog, keys: keys, runnerStatus: runnerStatus,
 		oauth: enabledOAuth, knownSchema: migrationCount(migs)}
 	diagnostics := func(ctx context.Context) diag.Report { return diag.Run(ctx, version, started, probes(dsrc)) }
+	aiSvc := &service.AIService{Store: db, Keys: keys, Bots: botSvc, Sites: sitesSvc, Files: wsm, Ops: ops, Audit: audit, Diagnostic: aiDiagnostic, Log: log}
+	aiSvc.Start(ctx)
 	app := api.New(api.Deps{Diagnostics: diagnostics, Log: log, Deploy: deploySvc, Backups: backupSvc, Stats: statsSrc, SFTP: sftpInfo, Analytics: analytics, PublicURL: cfg.PublicURL, DB: db, UI: webui.FS(), Auth: authSvc, Bots: botSvc, OAuth: oauthSvc,
 		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, MetricsToken: cfg.MetricsToken, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,
 		Console: consoleSvc, BaseCtx: ctx, RunnerReady: runnerReady, Ops: ops, Audit: audit, Schedules: scheduler,
 		MFA: &service.MFAService{Store: db, Keys: keys, Auth: authSvc}, Tokens: &service.TokenService{Store: db, Bots: botSvc}, Health: health,
-		Settings: settingsSvc, Sites: sitesSvc, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
+		Settings: settingsSvc, Sites: sitesSvc, AI: aiSvc, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
