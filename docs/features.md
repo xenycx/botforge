@@ -345,6 +345,12 @@ hard memory limits, and there are no disk quotas.
 Passwords (Argon2id), GitHub and Discord sign-in (`oauth.md`), password change
 that signs out other sessions, a sessions list with sign-out, and at most 20
 sessions per user. `botpanel reset-password EMAIL` is the host recovery path.
+With Mailgun configured (`email.md`) people can also reset a forgotten password
+from the sign-in page by emailed one-use link, administrators can email
+invitations, bot owners can receive alerts by email (switch in Profile), and
+every password or two-step change sends a security notice. Administrators can
+email HTML news and policy updates to accounts (Administration →
+Announcements; `email.md`).
 
 **Two-step sign-in** (TOTP): set up in Security with any authenticator app
 (key shown for manual entry, plus an `otpauth://` link for phones), confirmed

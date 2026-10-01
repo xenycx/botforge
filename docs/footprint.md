@@ -102,3 +102,28 @@ messages of at most 8 KiB, at most 64 console connections; runner workers
 bounded (default 2) and the work queue capped; telemetry pruned in batches of
 1000; the terminal and editor are lazy-loaded (the initial UI load is about
 33 KB gzipped with no xterm or CodeMirror in it).
+
+## Email (Mailgun) does not change the idle footprint (2026-10-01)
+
+Mailgun email adds no queue, no connection pool and no background goroutine: a
+message is one HTTPS request made from a goroutine that exists only while it
+runs (at most two at a time, extra messages dropped and logged), and settings
+are read from SQLite per message. The binary grew by about 86 KB.
+
+Measured the same way as above (fresh empty database, development mode, no
+browser, 60 s warm-up, `VmRSS` from `/proc/<pid>/status`), three starts of the
+production binary:
+
+| Binary | VmRSS |
+| --- | ---: |
+| Before the email work (commit 34178e6) | 34,840 kB |
+| With the email work, Mailgun not configured | 35,284 kB |
+| With the email work, Mailgun configured | 33,124 kB |
+
+The spread between identical starts (anonymous memory ranged 14.7 to 16.8 MB)
+is larger than the difference between the builds, so the honest reading is "no
+measurable change". These absolute figures are higher than the tables above; the earlier tables
+used a production-profile start, and this check used a development-mode start
+with the runner at its default, so compare the three rows with each other, not
+with the earlier tables. Not measured: the
+transient peak of a real TLS send to Mailgun, or bursts of alert emails.

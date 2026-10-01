@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"botpanel/internal/domain"
+	"botpanel/internal/mail"
 	"botpanel/internal/oauth"
 	"botpanel/internal/secrets"
 )
@@ -33,9 +34,13 @@ const (
 	SetDiscordID     = "discord_client_id"
 	SetDiscordSecret = "discord_client_secret"
 	SetAllowSignup   = "oauth_allow_signup"
+	SetMailKey       = "mailgun_api_key"
+	SetMailDomain    = "mailgun_domain"
+	SetMailRegion    = "mailgun_region"
+	SetMailFrom      = "mail_from"
 )
 
-var secretSettings = map[string]bool{SetGitHubSecret: true, SetDiscordSecret: true}
+var secretSettings = map[string]bool{SetGitHubSecret: true, SetDiscordSecret: true, SetMailKey: true}
 
 // EnvSettings are values fixed by the environment file; they win over stored
 // settings and are shown read-only.
@@ -45,6 +50,8 @@ type EnvSettings struct {
 	DiscordID, DiscordSecret    string
 	AllowSignup, AllowSignupSet bool
 	Production                  bool
+	// Mailgun (see internal/mail); empty means "decided in the panel".
+	MailKey, MailDomain, MailRegion, MailFrom string
 }
 
 // SettingsService holds panel settings chosen in the setup wizard or on the
@@ -76,6 +83,8 @@ type Effective struct {
 	GitHubID, GitHubSecret   string
 	DiscordID, DiscordSecret string
 	AllowSignup              bool
+	MailKey, MailDomain      string
+	MailRegion, MailFrom     string
 	Locked                   map[string]bool // set by the environment
 }
 
@@ -115,6 +124,10 @@ func (s *SettingsService) Effective(ctx context.Context) (Effective, error) {
 	pick(&e.GitHubSecret, s.Env.GitHubSecret, SetGitHubSecret)
 	pick(&e.DiscordID, s.Env.DiscordID, SetDiscordID)
 	pick(&e.DiscordSecret, s.Env.DiscordSecret, SetDiscordSecret)
+	pick(&e.MailKey, s.Env.MailKey, SetMailKey)
+	pick(&e.MailDomain, s.Env.MailDomain, SetMailDomain)
+	pick(&e.MailRegion, s.Env.MailRegion, SetMailRegion)
+	pick(&e.MailFrom, s.Env.MailFrom, SetMailFrom)
 	if s.Env.AllowSignupSet {
 		e.AllowSignup, e.Locked[SetAllowSignup] = s.Env.AllowSignup, true
 	} else {
@@ -154,6 +167,18 @@ type SettingsInput struct {
 	GitHubID, GitHubSecret   *string
 	DiscordID, DiscordSecret *string
 	AllowSignup              *bool
+	MailKey, MailDomain      *string
+	MailRegion, MailFrom     *string
+}
+
+// MailConfig is the effective Mailgun configuration (settings under the
+// environment). It reads the settings table on each call and keeps nothing.
+func (s *SettingsService) MailConfig(ctx context.Context) (mail.Config, error) {
+	e, err := s.Effective(ctx)
+	if err != nil {
+		return mail.Config{}, err
+	}
+	return mail.Config{APIKey: e.MailKey, Domain: e.MailDomain, Region: e.MailRegion, From: e.MailFrom}, nil
 }
 
 // ValidatePublicURL accepts a bare origin: https, or http for loopback and
@@ -250,6 +275,45 @@ func (s *SettingsService) update(ctx context.Context, in SettingsInput) error {
 		}
 		set = append(set, domain.Setting{Key: key, Cipher: sl.Ciphertext, Nonce: sl.Nonce, KeyID: sl.KeyID})
 	}
+	asInvalid := func(check func(string) (string, error)) func(string) (string, error) {
+		return func(v string) (string, error) {
+			out, err := check(v)
+			if err != nil {
+				return "", domain.Invalid(err.Error())
+			}
+			return out, nil
+		}
+	}
+	if err := plain(SetMailDomain, in.MailDomain, asInvalid(mail.ValidateDomain)); err != nil {
+		return err
+	}
+	if err := plain(SetMailFrom, in.MailFrom, asInvalid(mail.ValidateFrom)); err != nil {
+		return err
+	}
+	if err := plain(SetMailRegion, in.MailRegion, func(v string) (string, error) {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v != "" && v != mail.RegionUS && v != mail.RegionEU {
+			return "", domain.Invalid("the Mailgun region must be us or eu")
+		}
+		return v, nil
+	}); err != nil {
+		return err
+	}
+	if in.MailKey != nil {
+		val := strings.TrimSpace(*in.MailKey)
+		if len(val) > 200 || strings.ContainsAny(val, " \n\r\t") {
+			return domain.Invalid("that Mailgun API key looks wrong; copy it again from the Mailgun dashboard")
+		}
+		if val == "" {
+			set = append(set, domain.Setting{Key: SetMailKey}) // remove
+		} else {
+			sl, err := s.Keys.Seal("settings", SetMailKey, []byte(val))
+			if err != nil {
+				return err
+			}
+			set = append(set, domain.Setting{Key: SetMailKey, Cipher: sl.Ciphertext, Nonce: sl.Nonce, KeyID: sl.KeyID})
+		}
+	}
 	if in.AllowSignup != nil {
 		v := ""
 		if *in.AllowSignup {
@@ -280,6 +344,9 @@ type SettingsView struct {
 	AllowSignup                    bool
 	Locked                         map[string]bool
 	GitHubEnabled, DiscordEnabled  bool
+	MailKeySet, MailEnabled        bool
+	MailDomain, MailRegion         string
+	MailFrom                       string
 }
 
 // View returns the current settings without secret values (administrators).
@@ -297,7 +364,9 @@ func (s *SettingsService) view(ctx context.Context) (SettingsView, error) {
 	}
 	return SettingsView{PublicURL: e.PublicURL, GitHubID: e.GitHubID, DiscordID: e.DiscordID, GitHubSecretSet: e.GitHubSecret != "",
 		DiscordSecSet: e.DiscordSecret != "", AllowSignup: e.AllowSignup, Locked: e.Locked,
-		GitHubEnabled: s.OAuth.Enabled("github"), DiscordEnabled: s.OAuth.Enabled("discord")}, nil
+		GitHubEnabled: s.OAuth.Enabled("github"), DiscordEnabled: s.OAuth.Enabled("discord"),
+		MailKeySet: e.MailKey != "", MailEnabled: (mail.Config{APIKey: e.MailKey, Domain: e.MailDomain, From: e.MailFrom}).Configured(),
+		MailDomain: e.MailDomain, MailRegion: e.MailRegion, MailFrom: e.MailFrom}, nil
 }
 
 // ---- first-run setup ----

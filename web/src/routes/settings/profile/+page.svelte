@@ -5,6 +5,7 @@
 	import Icon from '$lib/components/ui/Icon.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
 	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
+	import Switch from '$lib/components/ui/Switch.svelte';
 
 	let name = $state(session.user?.display_name ?? '');
 	let avatar = $state<string | null>(null);
@@ -39,6 +40,25 @@
 		finally { saving = false; }
 	}
 	function remove() { avatar = ''; preview = ''; }
+
+	let alertsOn = $state(session.emailAlerts);
+	let newsOn = $state(session.emailNews);
+	let alertsBusy = $state(false);
+	async function savePref(kind: 'alerts' | 'news') {
+		await Promise.resolve(); // let the bound value settle first
+		alertsBusy = true;
+		const want = kind === 'alerts' ? alertsOn : newsOn;
+		try {
+			await api('PUT', `/me/email-${kind}`, { enabled: want });
+			if (kind === 'alerts') session.emailAlerts = want;
+			else session.emailNews = want;
+			toast(`${kind === 'alerts' ? 'Alert' : 'News'} emails turned ${want ? 'on' : 'off'}`, 'success');
+		} catch (e) {
+			if (kind === 'alerts') alertsOn = !want;
+			else newsOn = !want;
+			toast(e instanceof ApiError ? e.message : 'The setting could not be saved.', 'fail');
+		} finally { alertsBusy = false; }
+	}
 </script>
 
 <svelte:head><title>Profile · BotForge</title></svelte:head>
@@ -62,3 +82,11 @@
 		<div class="flex justify-end border-t border-rule-soft pt-4"><button class="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></div>
 	</form>
 </SettingsSection>
+{#if session.features.mail}
+	<SettingsSection title="Email" description="Bot alerts can also reach you by email at the address you sign in with.">
+		<div class="card grid gap-5 p-5">
+			<Switch bind:checked={alertsOn} disabled={alertsBusy} label="Email me bot alerts" onchange={() => savePref('alerts')}>Crashes, failed deployments and backups, and bots that stop reporting, for bots whose alerts are on.</Switch>
+			<Switch bind:checked={newsOn} disabled={alertsBusy} label="Email me news and announcements" onchange={() => savePref('news')}>Optional news from the administrators. Notices about policy, service and security, and security emails about your account, are always sent.</Switch>
+		</div>
+	</SettingsSection>
+{/if}

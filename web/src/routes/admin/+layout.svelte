@@ -9,6 +9,7 @@
 		{ href: '/admin/sites', label: 'Sites and domains', icon: 'globe' as const },
 		{ href: '/admin/host', label: 'Host', icon: 'chart' as const },
 		{ href: '/admin/settings', label: 'Panel settings', icon: 'gear' as const },
+		{ href: '/admin/mail', label: 'Announcements', icon: 'send' as const },
 		{ href: '/admin/environment', label: 'Environment', icon: 'sliders' as const },
 		{ href: '/admin/diagnostics', label: 'Diagnostics', icon: 'shield' as const }
 	];

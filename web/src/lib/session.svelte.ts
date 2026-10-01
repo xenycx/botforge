@@ -2,9 +2,9 @@ import { goto } from '$app/navigation';
 import { api, setCsrf, setUnauthorizedHandler } from '$lib/api/client';
 import type { User } from '$lib/api/types';
 
-export type Features = { runner: boolean; console: boolean; stats: boolean; files: boolean; deploy: boolean; backups: boolean; analytics: boolean; sftp: boolean; operations: boolean; oauth: boolean; schedules: boolean; mfa: boolean; automation: boolean; health: boolean; sites: boolean; workspaces: boolean; ai: boolean };
-const allOn: Features = { runner: true, console: true, stats: true, files: true, deploy: true, backups: true, analytics: true, sftp: true, operations: true, oauth: true, schedules: true, mfa: true, automation: true, health: true, sites: false, workspaces: true, ai: true };
-export const session = $state<{ user: User | null; loaded: boolean; hasPassword: boolean; features: Features }>({ user: null, loaded: false, hasPassword: true, features: allOn });
+export type Features = { runner: boolean; console: boolean; stats: boolean; files: boolean; deploy: boolean; backups: boolean; analytics: boolean; sftp: boolean; operations: boolean; oauth: boolean; schedules: boolean; mfa: boolean; automation: boolean; health: boolean; sites: boolean; workspaces: boolean; ai: boolean; mail: boolean };
+const allOn: Features = { runner: true, console: true, stats: true, files: true, deploy: true, backups: true, analytics: true, sftp: true, operations: true, oauth: true, schedules: true, mfa: true, automation: true, health: true, sites: false, workspaces: true, ai: true, mail: false };
+export const session = $state<{ user: User | null; loaded: boolean; hasPassword: boolean; emailAlerts: boolean; emailNews: boolean; features: Features }>({ user: null, loaded: false, hasPassword: true, emailAlerts: true, emailNews: true, features: allOn });
 
 setUnauthorizedHandler(() => {
 	if (session.user) {
@@ -15,10 +15,12 @@ setUnauthorizedHandler(() => {
 
 export async function loadSession() {
 	try {
-		const r = await api<{ user: User; csrf_token: string; has_password: boolean; features: Features }>('GET', '/auth/me');
+		const r = await api<{ user: User; csrf_token: string; has_password: boolean; email_alerts: boolean; email_news: boolean; features: Features }>('GET', '/auth/me');
 		setCsrf(r.csrf_token);
 		session.user = r.user;
 		session.hasPassword = r.has_password;
+		session.emailAlerts = r.email_alerts !== false;
+		session.emailNews = r.email_news !== false;
 		session.features = { ...allOn, ...r.features };
 	} catch {
 		session.user = null;

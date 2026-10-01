@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
@@ -64,7 +65,7 @@ func TestMigrateIdempotentAndSchema(t *testing.T) {
 	}
 	var versions int
 	db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions)
-	if versions != 32 {
+	if versions != 34 {
 		t.Fatalf("versions = %d", versions)
 	}
 	var tables int
@@ -185,5 +186,31 @@ func TestInstallationIDIsStable(t *testing.T) {
 	b, err := db.InstallationID(ctx, 2)
 	if err != nil || a != b {
 		t.Fatalf("second call changed the identity: %q -> %q (%v)", a, b, err)
+	}
+}
+
+// A nil keep must revoke every session (the CLI password reset and the emailed
+// reset link rely on it); a non-nil keep spares exactly that one.
+func TestSetPasswordRevokesSessions(t *testing.T) {
+	ctx := context.Background()
+	db := open(t)
+	u := domain.User{ID: "u1", Email: "u1@x.io", PasswordHash: "h", Role: domain.RoleUser, CreatedAtMS: 1, UpdatedAtMS: 1}
+	if err := db.CreateUser(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	for i, h := range [][]byte{bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)} {
+		if err := db.CreateSession(ctx, h, domain.Session{ID: string(rune('a' + i)), UserID: u.ID, CreatedAtMS: 1, ExpiresAtMS: 1 << 40, AuthAtMS: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func() int {
+		ss, _ := db.ListSessions(ctx, u.ID, 2)
+		return len(ss)
+	}
+	if err := db.SetPassword(ctx, u.ID, "h2", bytes.Repeat([]byte{1}, 32), 3); err != nil || count() != 1 {
+		t.Fatalf("keep one: %v, %d left", err, count())
+	}
+	if err := db.SetPassword(ctx, u.ID, "h3", nil, 4); err != nil || count() != 0 {
+		t.Fatalf("keep none: %v, %d left", err, count())
 	}
 }

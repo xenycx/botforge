@@ -6,6 +6,22 @@ items state exactly what remains.
 
 ## Completed in 0.4.0, 0.3.0 and since 0.2.0
 
+- [x] Email through Mailgun (Unreleased): password reset by emailed link,
+  invitation emails, bot alerts by email, and security notices; configured in
+  Panel settings (key sealed) or `BOTPANEL_MAILGUN_*`. Enforcement: the sealing,
+  the always-identical reset answer, one-use hashed expiring links, the
+  sign-out of every session on reset and the sending caps (20 per recipient,
+  300 per hour) are application level; delivery and reputation are Mailgun's.
+  No queue, pool or background goroutine, so idle memory is unchanged
+  (`footprint.md`). Limits: no Mailgun webhooks (bounces and complaints are not
+  tracked), no retries, one sender, plain text plus simple HTML, no templates
+  or attachments. Announcements (Administration → Announcements): administrators
+  email sanitized HTML as a notice or opt-out news to all accounts or admins
+  (batched, recipients hidden from each other, test-to-self required first, one
+  at a time, at most 1,000 recipients); enforcement is application level. No
+  drafts, history, scheduling, tracking or per-person targeting. Also fixed: `SetPassword` with no session to keep now really
+  signs the account out everywhere (it used a SQL `!=` against NULL).
+
 - [x] Host monitoring and panel logs (0.4.0): richer host samples (load,
   swap, network, disk throughput) with bucketed 1 h to 30 d history, a live
   host/process/Docker/storage snapshot, per-bot resource use, an in-memory
@@ -97,7 +113,7 @@ items state exactly what remains.
   Docker-runtime-level.
 
 Migrations added since 0.2.0 (the schema-version assertion in
-`internal/store/sqlite/db_test.go` is 32):
+`internal/store/sqlite/db_test.go` is 34):
 
 | Migration | Purpose |
 | --- | --- |
@@ -109,6 +125,8 @@ Migrations added since 0.2.0 (the schema-version assertion in
 | `0029_ai_tool_call_ids.sql` | `ai_tool_calls.provider_call_id`; rows are keyed by panel UUIDs (existing rows keep their id) |
 | `0031_env_overrides.sql` | Environment overrides saved from the administration page (secrets sealed under namespace `env`; included in `verify`, `reseal` and `WalkSealed`) |
 | `0032_host_telemetry.sql` | `node_telemetry` gains `load1`, swap, network and disk throughput columns (existing rows read as zero) |
+| `0033_mail.sql` | `password_resets` (hashed one-use reset links, one per account) and `users.email_alerts` (alert-email switch, default on) |
+| `0034_mail_news.sql` | `users.email_news` (optional news-email switch, default on) |
 | `0030_ai_global_chat.sql` | Rebuilds `ai_conversations` so a chat may have no target; `ai_runs.bot_id`/`site_id`, `ai_messages.context_json` (the conversation subtree is stashed and restored, rows preserved) |
 
 Known gaps in this work:
@@ -120,8 +138,9 @@ Known gaps in this work:
 - [ ] Sites have no automation-API upload route, redirects/headers files,
   password protection, per-site analytics, bandwidth limits, or server-side
   builds; uploads are not malware-scanned.
-- [ ] Workspace-level quotas (limits still apply per bot owner), ownership
-  transfer of a workspace, and email invitations for people without an account.
+- [ ] Workspace-level quotas (limits still apply per bot owner) and ownership
+  transfer of a workspace. Account invitations can now be emailed (Mailgun);
+  workspace and bot-share invitations are still links only.
 - [ ] GitHub publishing does not support Git LFS, submodules, or pushing to
   a repository that has no commits yet.
 

@@ -65,8 +65,8 @@ func (s *server) me(c fiber.Ctx) error {
 			"runner": s.bots.Notifier != nil, "console": s.console != nil, "stats": s.stats != nil, "files": s.files != nil,
 			"deploy": s.deploy != nil && s.oauth.Enabled("github"), "backups": s.backups != nil, "analytics": s.analytics != nil, "sftp": s.sftp != nil,
 			"operations": s.ops != nil, "oauth": s.oauth.AnyEnabled(), "schedules": s.schedules != nil, "mfa": s.mfa != nil, "automation": s.tokens != nil, "health": s.health != nil,
-			"sites": s.sites.Enabled(), "workspaces": true, "ai": s.ai != nil,
-		}})
+			"sites": s.sites.Enabled(), "workspaces": true, "ai": s.ai != nil, "mail": s.mail.Enabled(c.Context()),
+		}, "email_alerts": s.emailAlerts(c), "email_news": s.emailNews(c)})
 }
 
 func (s *server) updateProfile(c fiber.Ctx) error {
@@ -192,6 +192,7 @@ func (s *server) changePassword(c fiber.Ctx) error {
 	if err := s.auth.ChangePassword(c.Context(), currentUser(c), currentToken(c), in.Current, in.New); err != nil {
 		return err
 	}
+	s.notifySecurity(currentUser(c), "The password for this account was changed, and your other sessions were signed out.")
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -288,4 +289,23 @@ func (s *server) recordSignIn(c fiber.Ctx, u domain.User, email string, err erro
 	}
 	ev.ActorID, ev.ActorLabel, ev.SubjectUserID = &u.ID, &u.Email, &u.ID
 	s.audit.Record(c.Context(), ev)
+}
+
+// emailAlerts is whether the signed-in account gets alert emails (true when
+// the switch is not available).
+func (s *server) emailAlerts(c fiber.Ctx) bool {
+	if s.mailPrefs == nil {
+		return true
+	}
+	on, err := s.mailPrefs.UserEmailAlerts(c.Context(), currentUser(c).ID)
+	return err != nil || on
+}
+
+// emailNews is whether the signed-in account gets optional news emails.
+func (s *server) emailNews(c fiber.Ctx) bool {
+	if s.mailPrefs == nil {
+		return true
+	}
+	on, err := s.mailPrefs.UserEmailNews(c.Context(), currentUser(c).ID)
+	return err != nil || on
 }

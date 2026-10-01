@@ -9,6 +9,7 @@ the guides below.
 - [Deployment](deployment.md) — binary, systemd, reverse proxy, and first admin
 - [Container deployment](container.md) — GHCR image and Docker Compose
 - [OAuth setup](oauth.md) — GitHub and Discord sign-in
+- [Email (Mailgun)](email.md) — password reset, invitations, alert emails and security notices
 - [Backups](backup.md) — installation backup, verification, and restore
 - [Diagnostics and footprint](footprint.md) — memory expectations and measurement
 

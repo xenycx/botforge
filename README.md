@@ -19,6 +19,7 @@ static binary, Docker for isolation.
 * Node telemetry with bounded retention; SQLite-aware backup and restore
 * Users with ownership checks, Argon2id, CSRF-protected cookie sessions
 * Sign-in with GitHub and Discord (linkable, self-hostable OAuth; `docs/oauth.md`)
+* Optional email through Mailgun: password reset, invitations, bot alerts and security notices (`docs/email.md`) and an admin Announcements tab for HTML news and policy updates; off by default and free at idle
 * Quickstart templates (discord.js, discord.py, Poise, JDA, DiscordGo) and
   GitHub deployments with auto-deploy on push
 * Power controls incl. emergency kill, live CPU/RAM/disk gauges, per-bot
@@ -87,6 +88,7 @@ Start at the [documentation index](docs/README.md). The project home is
 * [CHANGELOG.md](CHANGELOG.md): versioned release history
 * [docs/implementation-status.md](docs/implementation-status.md): completed and remaining platform-overhaul work
 * `docs/oauth.md`: GitHub/Discord sign-in setup, Cloudflare, troubleshooting
+* `docs/email.md`: Mailgun setup, what is emailed, security properties and limits
 
 ## Validation (2026-09-30, Linux 7.2.5 x86_64, Go 1.27.1, Node 26.8.1)
 

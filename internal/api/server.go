@@ -43,28 +43,31 @@ type Deps struct {
 
 	Auth          *service.AuthService // nil disables the authenticated API (tests/foundation)
 	Bots          *service.BotService
-	OAuth         *service.OAuthService    // nil disables OAuth routes
-	SFTP          *SFTPInfo                // nil when the SFTP server is disabled
-	Analytics     *service.Analytics       // nil disables bot telemetry routes
-	PublicURL     string                   // externally reachable origin, handed to bots
-	Registry      *pkgmgr.Registry         // package registry client; default used when nil
-	Stats         StatsSource              // Docker stats stream; nil disables live gauges
-	Backups       *service.BackupService   // nil disables the backup routes
-	Deploy        *service.DeployService   // nil disables GitHub deployment routes
-	Ops           *service.Operations      // nil disables operation history routes
-	Audit         *service.Audit           // nil disables the activity record
-	Schedules     *service.Scheduler       // nil disables scheduled actions
-	MFA           *service.MFAService      // nil disables two-step sign-in
-	Tokens        *service.TokenService    // nil disables the automation API
-	Health        *service.HealthService   // nil disables application health and alert rules
-	Settings      *service.SettingsService // nil disables the setup wizard and panel settings
-	Sites         *service.SiteService     // nil (or not started) disables static site hosting
-	AI            *service.AIService       // nil disables the AI operator
-	Env           *service.PanelEnvService // nil disables the environment editor
-	Host          *hostmon.Monitor         // nil disables the host monitoring routes
-	Logs          *logbuf.Buffer           // nil disables the panel log viewer
-	SetupCodeFile string                   // shown by the setup wizard
-	OnSetupDone   func()                   // called after the first administrator is created
+	OAuth         *service.OAuthService         // nil disables OAuth routes
+	SFTP          *SFTPInfo                     // nil when the SFTP server is disabled
+	Analytics     *service.Analytics            // nil disables bot telemetry routes
+	PublicURL     string                        // externally reachable origin, handed to bots
+	Registry      *pkgmgr.Registry              // package registry client; default used when nil
+	Stats         StatsSource                   // Docker stats stream; nil disables live gauges
+	Backups       *service.BackupService        // nil disables the backup routes
+	Deploy        *service.DeployService        // nil disables GitHub deployment routes
+	Ops           *service.Operations           // nil disables operation history routes
+	Audit         *service.Audit                // nil disables the activity record
+	Schedules     *service.Scheduler            // nil disables scheduled actions
+	MFA           *service.MFAService           // nil disables two-step sign-in
+	Tokens        *service.TokenService         // nil disables the automation API
+	Health        *service.HealthService        // nil disables application health and alert rules
+	Settings      *service.SettingsService      // nil disables the setup wizard and panel settings
+	Mail          *service.MailService          // nil disables email (alerts, invitations, notices)
+	Resets        *service.PasswordResetService // nil disables "Forgot password?"
+	MailPrefs     MailPrefs                     // per-account alert-email switch; nil hides it
+	Sites         *service.SiteService          // nil (or not started) disables static site hosting
+	AI            *service.AIService            // nil disables the AI operator
+	Env           *service.PanelEnvService      // nil disables the environment editor
+	Host          *hostmon.Monitor              // nil disables the host monitoring routes
+	Logs          *logbuf.Buffer                // nil disables the panel log viewer
+	SetupCodeFile string                        // shown by the setup wizard
+	OnSetupDone   func()                        // called after the first administrator is created
 	Catalog       *runtimes.Catalog
 	SecureCookies bool   // Secure flag on the session cookie (production)
 	ProxyHeader   string // trusted client-IP header from a loopback reverse proxy; empty = none
@@ -119,6 +122,9 @@ type server struct {
 	tokens        *service.TokenService
 	health        *service.HealthService
 	settings      *service.SettingsService
+	mail          *service.MailService
+	resets        *service.PasswordResetService
+	mailPrefs     MailPrefs
 	sites         *service.SiteService
 	ai            *service.AIService
 	env           *service.PanelEnvService
@@ -197,7 +203,7 @@ func New(d Deps) *fiber.App {
 		return c.JSON(fiber.Map{"status": "ok", "checks": checks})
 	})
 	if d.Auth != nil && d.Bots != nil {
-		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, sites: d.Sites, ai: d.AI, env: d.Env, host: d.Host, logs: d.Logs, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
+		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, mail: d.Mail, resets: d.Resets, mailPrefs: d.MailPrefs, sites: d.Sites, ai: d.AI, env: d.Env, host: d.Host, logs: d.Logs, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
 			console: d.Console, consoleLimit: d.ConsoleLimit, baseCtx: d.BaseCtx, nodes: d.Nodes, files: d.Files, maxUpload: d.MaxUpload,
 			runnerReady: d.RunnerReady, buildMemory: d.BuildMemory, diagnostics: d.Diagnostics}
 		if s.buildMemory == 0 {
@@ -254,6 +260,14 @@ func securityHeaders(c fiber.Ctx) error {
 	return c.Next()
 }
 
+// MailPrefs stores each account's alert-email switch.
+type MailPrefs interface {
+	UserEmailAlerts(ctx context.Context, userID string) (bool, error)
+	SetUserEmailAlerts(ctx context.Context, userID string, on bool) error
+	UserEmailNews(ctx context.Context, userID string) (bool, error)
+	SetUserEmailNews(ctx context.Context, userID string, on bool) error
+}
+
 func (s *server) routes(v1 fiber.Router) {
 	v1.Use(s.checkOrigin)
 	v1.Post("/auth/login", limiter.New(limiter.Config{
@@ -303,6 +317,18 @@ func (s *server) routes(v1 fiber.Router) {
 		v1.Get("/setup/status", s.setupStatus)
 		v1.Post("/setup/check", setupLimit, s.setupCheck)
 		v1.Post("/setup/complete", setupLimit, s.setupComplete)
+	}
+	if s.resets != nil {
+		resetLimit := limiter.New(limiter.Config{
+			Max: 10, Expiration: 10 * time.Minute,
+			KeyGenerator: func(c fiber.Ctx) string { return "reset:" + c.IP() },
+			LimitReached: func(c fiber.Ctx) error {
+				return fiber.NewError(fiber.StatusTooManyRequests, "too many password reset attempts; try again in a few minutes")
+			},
+		})
+		v1.Get("/auth/password-reset", s.resetAvailable)
+		v1.Post("/auth/password-reset/request", resetLimit, s.requestPasswordReset)
+		v1.Post("/auth/password-reset/confirm", resetLimit, s.confirmPasswordReset)
 	}
 	v1.Get("/auth/providers", s.oauthProviders)
 	v1.Get("/registration", s.registrationStatus)
@@ -378,6 +404,10 @@ func (s *server) routes(v1 fiber.Router) {
 	})
 	authed.Get("/me/sessions", s.listSessions)
 	authed.Put("/me/profile", s.updateProfile)
+	if s.mailPrefs != nil {
+		authed.Put("/me/email-alerts", s.putEmailAlerts)
+		authed.Put("/me/email-news", s.putEmailNews)
+	}
 	authed.Get("/users/:id/avatar", s.userAvatar)
 	authed.Delete("/me/sessions/:sid", s.revokeSession)
 	authed.Post("/me/sessions/revoke-others", s.revokeOtherSessions)
@@ -446,6 +476,11 @@ func (s *server) routes(v1 fiber.Router) {
 	if s.settings != nil {
 		authed.Get("/admin/settings", s.requireAdmin, s.getSettings)
 		authed.Put("/admin/settings", s.requireAdmin, s.putSettings)
+		if s.mail != nil {
+			authed.Post("/admin/settings/mail/test", s.requireAdmin, s.testMail)
+			authed.Get("/admin/mail/audience", s.requireAdmin, s.mailAudience)
+			authed.Post("/admin/mail/announcements", s.requireAdmin, s.sendAnnouncement)
+		}
 	}
 	if s.env != nil {
 		authed.Get("/admin/environment", s.requireAdmin, s.getEnvironment)

@@ -18,8 +18,9 @@
 	let q = $state('');
 	let addOpen = $state(false);
 	let inviteOpen = $state(false);
-	let inviteForm = $state({ email: '', role: 'user', expires_in_days: 7 });
+	let inviteForm = $state({ email: '', role: 'user', expires_in_days: 7, send_email: false });
 	let inviteLink = $state('');
+	let inviteMail = $state('');
 	let form = $state({ email: '', password: '', role: 'user' });
 	let addError = $state('');
 	let busy = $state(false);
@@ -57,8 +58,10 @@
 	async function invite(e: SubmitEvent) {
 		e.preventDefault(); addError = ''; busy = true;
 		try {
-			const r = await api<{ path: string }>('POST', '/admin/account-invites', inviteForm);
-			inviteLink = location.origin + r.path; toast('Invitation created', 'success');
+			const r = await api<{ path: string; emailed: boolean; email_error: string }>('POST', '/admin/account-invites', { ...inviteForm, send_email: inviteForm.send_email && !!inviteForm.email });
+			inviteLink = location.origin + r.path;
+			inviteMail = r.emailed ? `We emailed the link to ${inviteForm.email}. It is also here in case you need it.` : r.email_error ? `The email was not sent: ${r.email_error}.` : '';
+			toast(r.emailed ? 'Invitation created and emailed' : 'Invitation created', 'success');
 		} catch (err) { addError = msg(err); } finally { busy = false; }
 	}
 	async function copyInvite() { await navigator.clipboard.writeText(inviteLink); toast('Invitation link copied'); }
@@ -112,7 +115,7 @@
 		<h2 class="text-section">Users</h2>
 		<p class="mt-1 text-muted">{users?.length ?? '…'} account{users?.length === 1 ? '' : 's'}, {admins} administrator{admins === 1 ? '' : 's'}.</p>
 	</div>
-	<div class="flex gap-2"><button class="btn" onclick={() => { inviteOpen = true; inviteLink = ''; addError = ''; }}><Icon name="link" />Invite user</button><button class="btn btn-primary" onclick={() => (addOpen = true)}><Icon name="plus" />Add user</button></div>
+	<div class="flex gap-2"><button class="btn" onclick={() => { inviteOpen = true; inviteLink = ''; inviteMail = ''; addError = ''; }}><Icon name="link" />Invite user</button><button class="btn btn-primary" onclick={() => (addOpen = true)}><Icon name="plus" />Add user</button></div>
 </div>
 
 {#if (users?.length ?? 0) > 8}
@@ -169,13 +172,14 @@
 
 <Dialog bind:open={inviteOpen} title="Invite a user" size="sm">
 	{#if inviteLink}
-		<p class="text-muted">This link is shown once. Send it to the person you want to invite.</p>
+		<p class="text-muted">{inviteMail || 'This link is shown once. Send it to the person you want to invite.'}</p>
 		<div class="mt-3 flex gap-2"><input class="field font-mono text-small" readonly value={inviteLink} /><button class="btn" onclick={copyInvite}>Copy</button></div>
 	{:else}
 		<form id="user-invite" class="grid gap-4" onsubmit={invite}>
 			<label><span class="label">Email (optional)</span><input class="field" type="email" bind:value={inviteForm.email} placeholder="Locks the link to this address" /></label>
 			<label><span class="label">Role</span><select class="field" bind:value={inviteForm.role}><option value="user">User</option><option value="admin">Administrator</option></select></label>
 			<label><span class="label">Expires after</span><select class="field" bind:value={inviteForm.expires_in_days}><option value={1}>1 day</option><option value={3}>3 days</option><option value={7}>7 days</option><option value={14}>14 days</option></select></label>
+			{#if session.features.mail}<label class="flex items-start gap-2.5"><input type="checkbox" class="mt-0.5" bind:checked={inviteForm.send_email} disabled={!inviteForm.email} /><span>Email the link to this address<span class="help">{inviteForm.email ? 'The link is also shown here afterwards.' : 'Enter an email address above to send the link.'}</span></span></label>{/if}
 			{#if addError}<p class="text-small text-fail">{addError}</p>{/if}
 		</form>
 	{/if}

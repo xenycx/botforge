@@ -34,7 +34,7 @@
 	let sidebarCollapsed = $state(readSidebarPreference());
 
 	// Pages that work without an account.
-	const PUBLIC = ['/', '/login', '/register', '/welcome', '/setup', '/docs'];
+	const PUBLIC = ['/', '/login', '/register', '/reset', '/welcome', '/setup', '/docs'];
 
 	onMount(async () => {
 		await loadSession();

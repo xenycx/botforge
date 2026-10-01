@@ -17,17 +17,23 @@ type settingsBody struct {
 	DiscordID     *string `json:"discord_client_id"`
 	DiscordSecret *string `json:"discord_client_secret"`
 	AllowSignup   *bool   `json:"oauth_allow_signup"`
+	MailKey       *string `json:"mailgun_api_key"`
+	MailDomain    *string `json:"mailgun_domain"`
+	MailRegion    *string `json:"mailgun_region"`
+	MailFrom      *string `json:"mail_from"`
 }
 
 func (b settingsBody) input() service.SettingsInput {
 	return service.SettingsInput{PublicURL: b.PublicURL, GitHubID: b.GitHubID, GitHubSecret: b.GitHubSecret,
-		DiscordID: b.DiscordID, DiscordSecret: b.DiscordSecret, AllowSignup: b.AllowSignup}
+		DiscordID: b.DiscordID, DiscordSecret: b.DiscordSecret, AllowSignup: b.AllowSignup,
+		MailKey: b.MailKey, MailDomain: b.MailDomain, MailRegion: b.MailRegion, MailFrom: b.MailFrom}
 }
 
 func settingsJSON(v service.SettingsView) fiber.Map {
 	return fiber.Map{"public_url": v.PublicURL, "github_client_id": v.GitHubID, "github_secret_set": v.GitHubSecretSet,
 		"discord_client_id": v.DiscordID, "discord_secret_set": v.DiscordSecSet, "oauth_allow_signup": v.AllowSignup,
-		"locked": v.Locked, "github_enabled": v.GitHubEnabled, "discord_enabled": v.DiscordEnabled}
+		"locked": v.Locked, "github_enabled": v.GitHubEnabled, "discord_enabled": v.DiscordEnabled,
+		"mailgun_key_set": v.MailKeySet, "mailgun_domain": v.MailDomain, "mailgun_region": v.MailRegion, "mail_from": v.MailFrom, "mail_enabled": v.MailEnabled}
 }
 
 // setupStatus is public: the interface uses it to send a fresh installation

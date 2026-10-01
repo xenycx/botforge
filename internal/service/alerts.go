@@ -16,12 +16,15 @@ import (
 
 	"botpanel/internal/domain"
 	"botpanel/internal/events"
+	"botpanel/internal/mail"
 	"botpanel/internal/secrets"
 )
 
 // AlertService posts deployment and crash notifications to the Discord webhook
-// a user granted when connecting Discord ("webhook.incoming"). Sending is best
-// effort: failures are logged and never affect the operation that triggered them.
+// a user granted when connecting Discord ("webhook.incoming") and, when Mailgun
+// is configured, emails the bot's owner (unless they switched alert emails off
+// on their profile). Sending is best effort: failures are logged and never
+// affect the operation that triggered them.
 type AlertService struct {
 	Store OAuthStore
 	Keys  *secrets.Keyring
@@ -33,6 +36,12 @@ type AlertService struct {
 	Now  func() time.Time
 	// Prefs returns a bot's notification preferences; nil sends everything.
 	Prefs func(ctx context.Context, botID string) (domain.AlertPrefs, error)
+	// Mail and Users enable the email channel; both nil leaves Discord only.
+	Mail  *MailService
+	Users interface {
+		GetUserByID(ctx context.Context, id string) (domain.User, error)
+		UserEmailAlerts(ctx context.Context, userID string) (bool, error)
+	}
 
 	mu   sync.Mutex
 	last map[string]time.Time // per-bot crash alert throttle
@@ -105,16 +114,64 @@ func (a *AlertService) Wants(ctx context.Context, botID, kind string) bool {
 	return true
 }
 
-// Send posts a message to the user's webhook if they have one.
+// Send posts a message to the user's webhook and emails them, for whichever
+// channels they have. The email is sent in the background.
 func (a *AlertService) Send(ctx context.Context, userID, title, message string) {
-	_ = a.SendErr(ctx, userID, title, message)
+	if _, err := a.discord(ctx, userID, title, message); err != nil && a.Log != nil {
+		a.Log.Debug("discord alert not sent", "err", err)
+	}
+	a.email(ctx, userID, title, message, false)
 }
 
-// SendErr is Send that reports whether Discord accepted the message.
+// SendErr is Send that reports whether a message reached the user: it
+// succeeds when Discord or email accepted it, and waits for the email.
 func (a *AlertService) SendErr(ctx context.Context, userID, title, message string) error {
+	sent, derr := a.discord(ctx, userID, title, message)
+	if sent {
+		a.email(ctx, userID, title, message, false)
+		return nil
+	}
+	esent, eerr := a.email(ctx, userID, title, message, true)
+	if esent {
+		return nil
+	}
+	if eerr != nil && !errors.Is(eerr, errNoEmail) {
+		return eerr
+	}
+	return derr
+}
+
+var errNoEmail = errors.New("no email channel")
+
+// email sends an alert to the user's address when the mail channel is on for
+// them. wait=false sends in the background and reports only that it started.
+func (a *AlertService) email(ctx context.Context, userID, title, message string, wait bool) (bool, error) {
+	if a.Mail == nil || a.Users == nil || !a.Mail.Enabled(ctx) {
+		return false, errNoEmail
+	}
+	on, err := a.Users.UserEmailAlerts(ctx, userID)
+	if err != nil || !on {
+		return false, errNoEmail
+	}
+	u, err := a.Users.GetUserByID(ctx, userID)
+	if err != nil || u.Disabled {
+		return false, errNoEmail
+	}
+	body := mail.Alert(title, clip(message, 1500))
+	if !wait {
+		return a.Mail.Queue(u.Email, body, "alert"), nil
+	}
+	if _, err := a.Mail.Send(ctx, u.Email, body, "alert"); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// discord posts to the user's webhook and reports whether Discord accepted it.
+func (a *AlertService) discord(ctx context.Context, userID, title, message string) (bool, error) {
 	hook, ok := a.webhookFor(ctx, userID)
 	if !ok {
-		return domain.Invalid("no Discord webhook")
+		return false, domain.Invalid("no Discord webhook")
 	}
 	body, _ := json.Marshal(map[string]any{
 		"username": "BotForge", "allowed_mentions": map[string]any{"parse": []string{}},
@@ -126,21 +183,21 @@ func (a *AlertService) SendErr(ctx context.Context, userID, title, message strin
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := hc.Do(req)
 	if err != nil {
 		a.warn("discord webhook", errors.New("request failed"))
-		return domain.Invalid("Discord could not be reached")
+		return false, domain.Invalid("Discord could not be reached")
 	}
 	defer res.Body.Close()
 	io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
 	if res.StatusCode/100 != 2 {
 		a.warn("discord webhook", fmt.Errorf("status %d", res.StatusCode))
-		return domain.Invalid(fmt.Sprintf("Discord refused the message (HTTP %d); reconnect Discord notifications", res.StatusCode))
+		return false, domain.Invalid(fmt.Sprintf("Discord refused the message (HTTP %d); reconnect Discord notifications", res.StatusCode))
 	}
-	return nil
+	return true, nil
 }
 
 func clip(s string, n int) string {

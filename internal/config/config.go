@@ -71,12 +71,15 @@ type Config struct {
 
 	// PublicURL is the externally reachable origin of the panel (for example
 	// https://panel.example.com). OAuth redirect URIs are derived from it.
-	PublicURL        string
-	GitHubClientID   string
-	GitHubSecret     string
-	DiscordClientID  string
-	DiscordSecret    string
-	OAuthAllowSignup bool // let unknown OAuth identities create accounts
+	PublicURL       string
+	GitHubClientID  string
+	GitHubSecret    string
+	DiscordClientID string
+	DiscordSecret   string
+	// Mailgun (transactional email); the panel's Mail settings are used for
+	// whatever these leave empty. The key is a credential.
+	MailgunAPIKey, MailgunDomain, MailgunRegion, MailFrom string
+	OAuthAllowSignup                                      bool // let unknown OAuth identities create accounts
 	// OAuthAllowSignupSet is true when the environment decides it (then the
 	// settings page cannot change it).
 	OAuthAllowSignupSet bool
@@ -292,6 +295,10 @@ func LoadLookup(look Lookup) (Config, error) {
 	c.GitHubSecret = strings.TrimSpace(getenv("BOTPANEL_GITHUB_CLIENT_SECRET"))
 	c.DiscordClientID = strings.TrimSpace(getenv("BOTPANEL_DISCORD_CLIENT_ID"))
 	c.DiscordSecret = strings.TrimSpace(getenv("BOTPANEL_DISCORD_CLIENT_SECRET"))
+	c.MailgunAPIKey = strings.TrimSpace(getenv("BOTPANEL_MAILGUN_API_KEY"))
+	c.MailgunDomain = strings.TrimSpace(getenv("BOTPANEL_MAILGUN_DOMAIN"))
+	c.MailgunRegion = strings.ToLower(strings.TrimSpace(getenv("BOTPANEL_MAILGUN_REGION")))
+	c.MailFrom = strings.TrimSpace(getenv("BOTPANEL_MAIL_FROM"))
 	c.ProxyHeader = strings.TrimSpace(getenv("BOTPANEL_PROXY_HEADER"))
 	c.MetricsToken = strings.TrimSpace(getenv("BOTPANEL_METRICS_TOKEN"))
 	if v := getenv("BOTPANEL_BACKUP_DIR"); v != "" {

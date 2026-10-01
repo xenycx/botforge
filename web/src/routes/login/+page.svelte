@@ -13,6 +13,7 @@
 	let busy = $state(false);
 	let providers = $state<string[]>([]);
 	let reachable = $state(true);
+	let canReset = $state(false);
 	let errorEl: HTMLParagraphElement | undefined = $state();
 	// Second step: after a correct password (or a provider sign-in) for an
 	// account with two-step sign-in.
@@ -26,6 +27,11 @@
 		const ecode = page.url.searchParams.get('error');
 		if (ecode) error = oauthErrors[ecode] ?? 'Sign-in failed.';
 		if (page.url.searchParams.get('step') === 'mfa') showMFA();
+		try {
+			canReset = (await api<{ available: boolean }>('GET', '/auth/password-reset')).available;
+		} catch {
+			/* older server: no reset link */
+		}
 		try {
 			providers = (await api<{ providers: { id: string }[] }>('GET', '/auth/providers')).providers.map((p) => p.id);
 		} catch (e) {
@@ -141,6 +147,7 @@
 			<label class="block">
 				<span class="label">Password</span>
 				<input class="field" type="password" autocomplete="current-password" required bind:value={password} />
+				{#if canReset}<a class="help link" href="/reset">Forgot your password?</a>{/if}
 			</label>
 			<button class="btn btn-primary w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
 		</form>

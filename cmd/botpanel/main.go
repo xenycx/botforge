@@ -490,7 +490,8 @@ func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 	settingsSvc := &service.SettingsService{Store: db, Keys: keys, OAuth: oauthSvc, Auth: authSvc, Log: log,
 		Env: service.EnvSettings{PublicURL: cfg.PublicURL, GitHubID: cfg.GitHubClientID, GitHubSecret: cfg.GitHubSecret,
 			DiscordID: cfg.DiscordClientID, DiscordSecret: cfg.DiscordSecret, AllowSignup: cfg.OAuthAllowSignup,
-			AllowSignupSet: cfg.OAuthAllowSignupSet, Production: cfg.Production}}
+			AllowSignupSet: cfg.OAuthAllowSignupSet, Production: cfg.Production,
+			MailKey: cfg.MailgunAPIKey, MailDomain: cfg.MailgunDomain, MailRegion: cfg.MailgunRegion, MailFrom: cfg.MailFrom}}
 	if err := settingsSvc.Apply(startCtx); err != nil {
 		return fmt.Errorf("panel settings: %w", err)
 	}
@@ -533,7 +534,11 @@ func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 	}()
 	// Alerts and GitHub deployments are always wired; they report clearly
 	// when Discord or GitHub is not configured (yet).
-	alerts := &service.AlertService{Store: db, Keys: keys, Bots: db, Log: log, Prefs: db.GetAlertPrefs}
+	// Email (Mailgun) is configured in Panel settings or the environment and
+	// costs nothing while idle: no queue and no goroutine until a message is sent.
+	mailSvc := &service.MailService{Settings: settingsSvc, Recipients: db, Log: log}
+	resetSvc := &service.PasswordResetService{Auth: authSvc, Store: db, Mail: mailSvc, Settings: settingsSvc, Log: log}
+	alerts := &service.AlertService{Store: db, Keys: keys, Bots: db, Log: log, Prefs: db.GetAlertPrefs, Mail: mailSvc, Users: db}
 	go alerts.Watch(ctx, bus)
 	deploySvc := &service.DeployService{Bots: botSvc, OAuth: oauthSvc, Files: wsm, GH: &github.Client{}, Keys: keys,
 		Alerts: alerts, PublicURL: cfg.PublicURL, Log: log, Ops: ops}
@@ -688,7 +693,7 @@ func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, MetricsToken: cfg.MetricsToken, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,
 		Console: consoleSvc, BaseCtx: ctx, RunnerReady: runnerReady, Ops: ops, Audit: audit, Schedules: scheduler,
 		MFA: &service.MFAService{Store: db, Keys: keys, Auth: authSvc}, Tokens: &service.TokenService{Store: db, Bots: botSvc}, Health: health,
-		Settings: settingsSvc, Sites: sitesSvc, AI: aiSvc, Env: envSvc, Host: monitor, Logs: logs, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
+		Settings: settingsSvc, Mail: mailSvc, Resets: resetSvc, MailPrefs: db, Sites: sitesSvc, AI: aiSvc, Env: envSvc, Host: monitor, Logs: logs, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err

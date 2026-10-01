@@ -19,7 +19,13 @@
 		locked: Record<string, boolean>;
 		github_enabled: boolean;
 		discord_enabled: boolean;
+		mailgun_key_set: boolean;
+		mailgun_domain: string;
+		mailgun_region: string;
+		mail_from: string;
+		mail_enabled: boolean;
 	};
+	type MailTest = { message_id: string; domain: string; state: string; sandbox: boolean; dns_verified: boolean };
 	let v = $state<View | null>(null);
 	let error = $state('');
 	let warning = $state('');
@@ -30,6 +36,14 @@
 	let dcId = $state('');
 	let dcSecret = $state('');
 	let signup = $state(false);
+	let mgKey = $state('');
+	let mgDomain = $state('');
+	let mgRegion = $state('us');
+	let mgFrom = $state('');
+	let testTo = $state('');
+	let testing = $state(false);
+	let testResult = $state<MailTest | null>(null);
+	let testError = $state('');
 
 	function fill(x: View) {
 		v = x;
@@ -38,6 +52,10 @@
 		dcId = x.discord_client_id;
 		ghSecret = dcSecret = '';
 		signup = x.oauth_allow_signup;
+		mgDomain = x.mailgun_domain;
+		mgRegion = x.mailgun_region || 'us';
+		mgFrom = x.mail_from;
+		mgKey = '';
 	}
 	onMount(async () => {
 		try {
@@ -65,15 +83,41 @@
 		if (!v.locked.discord_client_id) body.discord_client_id = dcId;
 		if (!v.locked.discord_client_secret && dcSecret) body.discord_client_secret = dcSecret;
 		if (!v.locked.oauth_allow_signup) body.oauth_allow_signup = signup;
+		if (!v.locked.mailgun_api_key && mgKey) body.mailgun_api_key = mgKey;
+		if (!v.locked.mailgun_domain) body.mailgun_domain = mgDomain;
+		if (!v.locked.mailgun_region) body.mailgun_region = mgRegion;
+		if (!v.locked.mail_from) body.mail_from = mgFrom;
 		try {
 			fill(await api<View>('PUT', '/admin/settings', body));
-			await loadSession(); // feature flags follow the new providers
+			await loadSession(); // feature flags follow the new providers and email
 			warning = '';
 			toast('Settings saved and applied', 'success');
 		} catch (err) {
 			error = err instanceof ApiError ? err.message.charAt(0).toUpperCase() + err.message.slice(1) : 'The settings could not be saved.';
 		} finally {
 			saving = false;
+		}
+	}
+	async function sendTest() {
+		testing = true;
+		testResult = null;
+		testError = '';
+		try {
+			testResult = await api<MailTest>('POST', '/admin/settings/mail/test', { to: testTo.trim() });
+		} catch (err) {
+			testError = err instanceof ApiError ? err.message.charAt(0).toUpperCase() + err.message.slice(1) + '.' : 'The test could not be sent.';
+		} finally {
+			testing = false;
+		}
+	}
+	async function disableMail() {
+		try {
+			fill(await api<View>('PUT', '/admin/settings', { mailgun_api_key: '' }));
+			await loadSession();
+			testResult = null;
+			toast('Email turned off');
+		} catch (err) {
+			toast(err instanceof ApiError ? err.message : 'The request failed.', 'fail');
 		}
 	}
 	async function disable(p: 'github' | 'discord') {
@@ -136,6 +180,58 @@
 				</div>
 			</section>
 		{/each}
+
+
+		<section class="card p-5 sm:p-6 xl:col-span-2">
+			<div class="flex flex-wrap items-center gap-2">
+				<Icon name="send" size={20} class="text-muted" />
+				<h3 class="text-title font-semibold">Email (Mailgun)</h3>
+				<span class="pill" data-tone={v.mail_enabled ? 'run' : 'idle'}>{v.mail_enabled ? 'On' : 'Off'}</span>
+				<span class="flex-1"></span>
+				{#if v.mail_enabled && !v.locked.mailgun_api_key}<button type="button" class="btn btn-sm btn-danger" onclick={disableMail}>Turn off</button>{/if}
+			</div>
+			<p class="mt-1 text-small text-muted">Sends password-reset links, invitations, bot alerts and security notices. It needs the key, the sending domain and a sender; nothing runs in the background while it is idle.</p>
+			<div class="mt-4 grid gap-4 md:grid-cols-2">
+				<label class="block">
+					<span class="label">API key</span>
+					<input class="field font-mono" type="password" autocomplete="off" spellcheck="false" bind:value={mgKey} disabled={v.locked.mailgun_api_key} placeholder={v.mailgun_key_set ? '•••••••• saved; type to replace' : 'Mailgun private or domain sending key'} />
+					<span class="help">{v.locked.mailgun_api_key ? 'Set in the environment file (BOTPANEL_MAILGUN_API_KEY).' : 'Stored encrypted and never shown again.'}</span>
+				</label>
+				<label class="block">
+					<span class="label">Sending domain</span>
+					<input class="field font-mono" bind:value={mgDomain} disabled={v.locked.mailgun_domain} placeholder="mg.example.com" />
+					<span class="help">{v.locked.mailgun_domain ? 'Set in the environment file (BOTPANEL_MAILGUN_DOMAIN).' : 'A domain you verified in Mailgun. A sandbox domain only delivers to addresses you authorized there.'}</span>
+				</label>
+				<label class="block">
+					<span class="label">Region</span>
+					<select class="field" bind:value={mgRegion} disabled={v.locked.mailgun_region}>
+						<option value="us">US (api.mailgun.net)</option>
+						<option value="eu">EU (api.eu.mailgun.net)</option>
+					</select>
+					<span class="help">{v.locked.mailgun_region ? 'Set in the environment file (BOTPANEL_MAILGUN_REGION).' : 'The region your Mailgun domain was created in.'}</span>
+				</label>
+				<label class="block">
+					<span class="label">Sender</span>
+					<input class="field" bind:value={mgFrom} disabled={v.locked.mail_from} placeholder="BotForge <noreply@mg.example.com>" />
+					<span class="help">{v.locked.mail_from ? 'Set in the environment file (BOTPANEL_MAIL_FROM).' : 'Must be an address on the sending domain.'}</span>
+				</label>
+			</div>
+			<div class="mt-5 border-t border-rule-soft pt-4">
+				<p class="label">Send a test email</p>
+				<p class="help">Save first, then send. This also checks the key, region and the domain's DNS records.</p>
+				<div class="mt-2 flex flex-wrap gap-2">
+					<input class="field max-w-xs" type="email" bind:value={testTo} placeholder="Your address (default: your account email)" aria-label="Test recipient" />
+					<button type="button" class="btn" onclick={sendTest} disabled={testing || !v.mail_enabled}>{testing ? 'Sending…' : 'Send test'}</button>
+				</div>
+				{#if testResult}
+					<Notice tone={testResult.dns_verified && !testResult.sandbox ? 'success' : 'warn'} class="mt-3" title="Test email sent">
+						Accepted by Mailgun for {testResult.domain}.
+						{#if testResult.sandbox}This is a sandbox domain: it only delivers to authorized recipients.{:else if !testResult.dns_verified}The domain's sending DNS records are not all verified yet, so mail may land in spam.{:else}The domain is active and its DNS records are verified.{/if}
+					</Notice>
+				{/if}
+				{#if testError}<Notice tone="fail" class="mt-3" live>{testError}</Notice>{/if}
+			</div>
+		</section>
 
 		<div class="sticky bottom-4 flex justify-end xl:col-span-2"><button class="btn btn-primary shadow-overlay" disabled={saving}>{saving ? 'Saving…' : 'Save and apply'}</button></div>
 	</form>

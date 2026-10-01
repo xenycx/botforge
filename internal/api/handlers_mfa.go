@@ -112,6 +112,7 @@ func (s *server) mfaEnable(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	s.notifySecurity(currentUser(c), "Two-step sign-in was turned on for this account.")
 	c.Set(fiber.HeaderCacheControl, "no-store")
 	return c.JSON(fiber.Map{"recovery_codes": codes})
 }
@@ -129,6 +130,7 @@ func (s *server) mfaDisable(c fiber.Ctx) error {
 		}
 		return err
 	}
+	s.notifySecurity(currentUser(c), "Two-step sign-in was turned off for this account.")
 	return c.SendStatus(fiber.StatusNoContent)
 }
 

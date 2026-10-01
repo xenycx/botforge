@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"botpanel/internal/domain"
+	"botpanel/internal/mail"
 )
 
 type accountInviteDTO struct {
@@ -83,7 +84,8 @@ func (s *server) registerAccount(c fiber.Ctx) error {
 func (s *server) createAccountInvite(c fiber.Ctx) error {
 	var in struct {
 		Email, Role   string
-		ExpiresInDays int `json:"expires_in_days"`
+		ExpiresInDays int  `json:"expires_in_days"`
+		SendEmail     bool `json:"send_email"`
 	}
 	if err := decode(c, &in); err != nil {
 		return err
@@ -93,7 +95,13 @@ func (s *server) createAccountInvite(c fiber.Ctx) error {
 		return err
 	}
 	c.Set(fiber.HeaderCacheControl, "no-store")
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"invite": accountInviteOut(v), "token": tok, "path": "/register#" + tok})
+	// The invitation exists whether or not the email goes out, and its link is
+	// returned either way; the email result is reported next to it.
+	emailed, emailErr := false, ""
+	if in.SendEmail {
+		emailed, emailErr = s.emailInvite(c, v, tok, in.ExpiresInDays)
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"invite": accountInviteOut(v), "token": tok, "path": "/register#" + tok, "emailed": emailed, "email_error": emailErr})
 }
 
 func (s *server) listAccountInvites(c fiber.Ctx) error {
@@ -113,4 +121,23 @@ func (s *server) deleteAccountInvite(c fiber.Ctx) error {
 		return err
 	}
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// emailInvite mails the invitation link to the invited address and returns
+// whether it was started, or a sentence explaining why not.
+func (s *server) emailInvite(c fiber.Ctx, v domain.AccountInvite, tok string, days int) (bool, string) {
+	if v.Email == "" {
+		return false, "this invitation has no email address to send to"
+	}
+	if !s.mail.Enabled(c.Context()) {
+		return false, "email is not set up (Panel settings); copy the link instead"
+	}
+	e, err := s.settings.Effective(c.Context())
+	if err != nil || e.PublicURL == "" {
+		return false, "the panel address is not set (Panel settings), so the link cannot be mailed"
+	}
+	if !s.mail.Queue(v.Email, mail.Invitation(e.PublicURL+"/register#"+tok, v.Role, days), "invitation") {
+		return false, "the email could not be started; copy the link instead"
+	}
+	return true, ""
 }

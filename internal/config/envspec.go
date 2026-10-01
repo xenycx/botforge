@@ -192,6 +192,14 @@ var Vars = []VarSpec{
 		Description: "Discord OAuth client ID. Edited under Panel settings."},
 	{Name: "BOTPANEL_DISCORD_CLIENT_SECRET", Group: GroupAccounts, Kind: KindSecret, Managed: "/admin/settings",
 		Description: "Discord OAuth client secret. Edited under Panel settings."},
+	{Name: "BOTPANEL_MAILGUN_API_KEY", Group: GroupAccounts, Kind: KindSecret, Managed: "/admin/settings",
+		Description: "Mailgun API key used to send email. Edited under Panel settings."},
+	{Name: "BOTPANEL_MAILGUN_DOMAIN", Group: GroupAccounts, Kind: KindText, Managed: "/admin/settings",
+		Description: "Mailgun sending domain. Edited under Panel settings."},
+	{Name: "BOTPANEL_MAILGUN_REGION", Group: GroupAccounts, Kind: KindEnum, Options: []string{"us", "eu"}, Managed: "/admin/settings",
+		Description: "Mailgun region of the account (us or eu). Edited under Panel settings."},
+	{Name: "BOTPANEL_MAIL_FROM", Group: GroupAccounts, Kind: KindText, Managed: "/admin/settings",
+		Description: "Sender of panel email, like BotForge <noreply@example.com>. Edited under Panel settings."},
 }
 
 var varIndex = func() map[string]VarSpec {

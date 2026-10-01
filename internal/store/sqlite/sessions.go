@@ -127,7 +127,9 @@ func (db *DB) SetPassword(ctx context.Context, userID, hash string, keep []byte,
 	if n, _ := res.RowsAffected(); n == 0 {
 		return domain.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ? AND token_hash != ?`, userID, keep); err != nil {
+	// IS NOT, unlike !=, is true when keep is NULL, so a nil keep revokes every
+	// session as documented.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?`, userID, keep); err != nil {
 		return err
 	}
 	return tx.Commit()

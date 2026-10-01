@@ -6,6 +6,64 @@ authoritative current version.
 
 ## Unreleased
 
+### Added
+
+- **Email through Mailgun** (`docs/email.md`), off until an administrator
+  configures it in Administration → Panel settings → Email (Mailgun) or with
+  `BOTPANEL_MAILGUN_API_KEY`, `BOTPANEL_MAILGUN_DOMAIN`,
+  `BOTPANEL_MAILGUN_REGION` (`us` or `eu`) and `BOTPANEL_MAIL_FROM`. The key is
+  stored encrypted and never shown again; values in the environment file win
+  and show as read-only. **Send test** checks the key, region and the domain's
+  DNS verification and sends one message, with plain-language errors.
+- **Forgot your password?** on the sign-in page: an emailed one-use link that
+  expires after an hour, replaces any earlier link, and signs the account out
+  everywhere when used. The request answers identically for unknown and
+  disabled accounts, so it cannot be used to discover accounts, and the token
+  travels in the URL fragment. It appears only when email and the panel address
+  are both set (migration `0033`).
+- **Invitation emails**: tick "Email the link to this address" when inviting a
+  user. The invitation and its link are always created and shown; if the email
+  cannot be sent the dialog says why.
+- **Bot alerts by email** to the bot's owner, for the events that already post
+  to Discord (crash, deploy, backup, stopped reporting). Switch it off in
+  Settings → Profile → Email.
+- **Security notices** by email when a password is changed or reset, or
+  two-step sign-in is turned on or off. These cannot be switched off.
+- **Announcements** (Administration → Announcements): write HTML news or a
+  policy update, preview it in a sandboxed frame, send yourself a test (required
+  before sending), then email every enabled account or administrators only. A
+  *notice* reaches everyone in the audience; *news* skips accounts that turned
+  off "Email me news and announcements" in Settings → Profile (migration
+  `0034`). Messages go out in batches of up to 100 so each person sees only
+  their own address, with a plain-text alternative, a footer saying why they
+  received it, and scripts, frames, forms and event handlers stripped. Limits:
+  80 KB of HTML, 1,000 recipients, one at a time and one a minute (tests
+  exempt). Nothing is stored: no drafts, history or queue.
+- Activity record entries for test emails, announcements, news and alert-email
+  changes and password resets.
+
+### Fixed
+
+- **Security:** setting a password with no session to keep did not sign the
+  account out anywhere, because the SQL compared against NULL
+  (`token_hash != NULL`). `botpanel reset-password`, which documents that it
+  signs the account out everywhere, now really does; the new emailed reset
+  relies on it. Sessions created before the fix are not affected by past resets
+  retroactively: reset again, or use "sign out other sessions", if a past reset
+  was meant to end a compromise.
+
+### Operational notes
+
+- Idle memory is unchanged: email uses the standard library only, with no queue,
+  connection pool or background goroutine (measured in `docs/footprint.md`).
+  Sending is capped at 20 emails per recipient and 300 per hour; at most two
+  sends run at once and extras are dropped and logged, not buffered.
+- No Mailgun webhooks: bounces and complaints are not tracked, and nothing is
+  retried. A Mailgun sandbox domain only delivers to authorized recipients.
+- Migrations `0033` (`password_resets`, `users.email_alerts`) and `0034`
+  (`users.email_news`) default to on, which only matters once Mailgun is
+  configured and an administrator sends something.
+
 ## 0.4.0 - 2026-10-01
 
 ### Added
