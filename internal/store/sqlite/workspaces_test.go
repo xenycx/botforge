@@ -183,9 +183,9 @@ func TestSiteDomainsClaims(t *testing.T) {
 	if err := claim(a); err != domain.ErrConflict {
 		t.Fatalf("verified domain taken over: %v", err)
 	}
-	_, byDomain, err := db.SiteRoutes(ctx)
-	if err != nil || byDomain["www.example.com"].SiteID != b {
-		t.Fatalf("routes = %+v err=%v", byDomain, err)
+	routes, err := db.SiteRoutes(ctx)
+	if err != nil || routes.ByDomain["www.example.com"].SiteID != b {
+		t.Fatalf("routes = %+v err=%v", routes.ByDomain, err)
 	}
 	// Releases: only the site's own can be activated.
 	if err := db.InsertRelease(ctx, domain.SiteRelease{ID: "r1", SiteID: a, Source: "upload", Files: 1, Bytes: 1, CreatedAtMS: 1}); err != nil {

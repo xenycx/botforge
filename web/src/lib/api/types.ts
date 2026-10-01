@@ -321,6 +321,8 @@ export type Site = {
 	bot_id: string | null;
 	name: string;
 	slug: string;
+	domain_id: string | null;
+	base_domain: string;
 	url: string;
 	spa: boolean;
 	clean_urls: boolean;
@@ -364,4 +366,35 @@ export type SiteRelease = {
 	current: boolean;
 	created_at_ms: number;
 };
-export type SitesInfo = { enabled: boolean; domain?: string; example_url?: string; max_bytes?: number; max_domains?: number };
+/** A domain sites can be placed under: a site's address is <slug>.<domain>. */
+export type SiteBaseChoice = { id: string; domain: string; label: string; primary: boolean; example_url: string };
+export type SitesInfo = {
+	enabled: boolean;
+	domain?: string;
+	example_url?: string;
+	domains?: SiteBaseChoice[];
+	max_bytes?: number;
+	max_domains?: number;
+};
+/** A sites domain as administrators manage it. */
+export type SiteBaseDomain = {
+	id: string;
+	domain: string;
+	label: string;
+	enabled: boolean;
+	primary: boolean;
+	from_config: boolean;
+	serving: boolean;
+	verified: boolean;
+	verified_at_ms: number | null;
+	last_checked_at_ms: number | null;
+	last_error: string | null;
+	dns_target: string;
+	sites: number;
+	example_url: string;
+	txt_name: string;
+	txt_value: string;
+	record_type: 'CNAME' | 'A' | 'AAAA';
+	record_target: string;
+	created_at_ms: number;
+};

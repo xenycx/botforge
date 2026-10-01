@@ -653,7 +653,7 @@ func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 			panelHost = u.Hostname()
 		}
 		sitesSvc = &service.SiteService{Store: db, Bots: botSvc, OAuth: oauthSvc, GH: &github.Client{}, Dir: cfg.SitesDir,
-			BaseURL: cfg.SitesBaseURL, DNSTarget: cfg.SitesDNSTarget, PanelHost: panelHost, MaxBytes: cfg.SiteMaxBytes,
+			BaseURL: cfg.SitesBaseURL, ExtraDomains: cfg.SitesDomains, DNSTarget: cfg.SitesDNSTarget, PanelHost: panelHost, MaxBytes: cfg.SiteMaxBytes,
 			MaxPerUser: cfg.MaxSitesPerUser, Log: log}
 		if err := sitesSvc.Start(ctx); err != nil {
 			return err

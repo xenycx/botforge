@@ -57,7 +57,9 @@ registry mirror), `BOTPANEL_KEY_DIR`/`BOTPANEL_ACTIVE_KEY_ID`.
   `127.0.0.1:8081`) and `BOTPANEL_SITES_BASE_URL` (for example
   `https://sites.example.com`), add a wildcard DNS record and route every
   non-panel host name to that listener in the reverse proxy. Caddy's on-demand
-  TLS can ask the listener which host names may get certificates. Full setup:
+  TLS can ask the listener which host names may get certificates. More sites
+  domains come from `BOTPANEL_SITES_DOMAINS` or Administration → Sites and
+  domains; each needs its own wildcard DNS record and certificate. Full setup:
   `sites.md`. Releases live in `BOTPANEL_SITES_DIR`
   (`/var/lib/botpanel/sites`, inside the service's `ReadWritePaths`); include
   it in host backups.

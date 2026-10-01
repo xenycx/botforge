@@ -41,6 +41,46 @@ authoritative current version.
   exempt). Nothing is stored: no drafts, history or queue.
 - Activity record entries for test emails, announcements, news and alert-email
   changes and password resets.
+- **Change a site's address.** A site's Settings now edit its address
+  (`<name>.<sites domain>`), and `PATCH /sites/{id}` accepts `slug` and
+  `domain_id`. The move is immediate: the old address stops working and
+  another site can take it, while verified custom domains keep working.
+  Addresses follow the same rules as at creation and must be free on the
+  chosen sites domain.
+- **Several sites domains** (`docs/sites.md`). A site can live under any
+  enabled sites domain, and a name is unique per domain, so
+  `docs.sites.example.com` and `docs.pages.example.net` can be different
+  sites.
+  - Add domains with `BOTPANEL_SITES_DOMAINS` (comma-separated, trusted).
+  - Or add them at runtime in Administration → Sites and domains → Sites
+    domains. These serve only after a `_botforge-domain` TXT record proves
+    control, and are re-checked every six hours.
+  - Administrators choose the primary domain (the default for new sites), turn
+    domains off, move every site from one domain to another (all or nothing),
+    and remove unused ones.
+  - The New site dialog and a bot's Public page let the creator pick the
+    domain.
+  - The panel's host, its parent domains and subdomains, overlapping sites
+    domains, and custom domains under a sites domain are refused.
+  - The reverse proxy still needs a route and a certificate for every sites
+    domain. The guide shows a Traefik catch-all route and the Cloudflare
+    origin-certificate steps.
+- Activity record entries for sites-domain changes.
+
+### Changed
+
+- **Migration `0035`** rebuilds the `sites` table: the panel-wide unique slug
+  becomes unique per sites domain, and each site records its sites domain.
+  Every release, custom domain and assistant chat is kept. On first start the
+  host of `BOTPANEL_SITES_BASE_URL` becomes the primary sites domain and
+  existing sites are assigned to it, so every existing address stays the
+  same. If that host later changes while it is still the primary domain, the
+  domain and its sites follow it, as before. Back up the database before
+  upgrading. A database migrated by this version is refused by older builds.
+- Migrations that rebuild a table other tables reference can now run with
+  foreign keys off (marker `-- botpanel:foreign-keys-off`). They run on a
+  single connection, are checked with `PRAGMA foreign_key_check` before
+  commit, and turn foreign keys back on afterwards.
 
 ### Fixed
 

@@ -333,3 +333,173 @@ func TestSiteCustomDomains(t *testing.T) {
 	c.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Third"})
 	c.mustStatus(400, "POST", "/api/v1/sites", map[string]string{"name": "Fourth"})
 }
+
+func TestSiteAddressChange(t *testing.T) {
+	r := newSiteRig(t)
+	c := r.owner
+	var a, b struct{ ID, Slug, URL string }
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Bluntly", "slug": "page"}), &a)
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Other", "slug": "other"}), &b)
+	c.raw("POST", "/api/v1/sites/"+a.ID+"/upload", zipOf(t, map[string]string{"index.html": "bluntly"}), "application/zip")
+
+	// Taken, reserved and malformed addresses are refused and change nothing.
+	for _, bad := range []string{"other", "admin", "Bad_Slug", "ab", "a--b"} {
+		c.mustStatus(400, "PATCH", "/api/v1/sites/"+a.ID, map[string]string{"slug": bad})
+	}
+	if rec := r.get("page.sites.test", "/"); rec.Code != 200 || rec.Body.String() != "bluntly" {
+		t.Fatalf("refused change moved the site: %d", rec.Code)
+	}
+	// A viewer cannot move a site.
+	viewer := r.e.user("viewer@x.io", domain.RoleUser)
+	var ws wsList
+	json.Unmarshal(c.mustStatus(200, "GET", "/api/v1/workspaces", nil), &ws)
+	c.mustStatus(200, "PUT", "/api/v1/workspaces/"+ws.Workspaces[0].ID+"/members", map[string]string{"email": "viewer@x.io", "role": "viewer"})
+	viewer.mustStatus(403, "PATCH", "/api/v1/sites/"+a.ID, map[string]string{"slug": "bluntly"})
+
+	var detail struct {
+		Site struct{ Slug, URL string } `json:"site"`
+	}
+	json.Unmarshal(c.mustStatus(200, "PATCH", "/api/v1/sites/"+a.ID, map[string]string{"slug": " Bluntly "}), &detail)
+	if detail.Site.Slug != "bluntly" || detail.Site.URL != "http://bluntly.sites.test:8081" {
+		t.Fatalf("after change = %+v", detail.Site)
+	}
+	if rec := r.get("bluntly.sites.test", "/"); rec.Code != 200 || rec.Body.String() != "bluntly" {
+		t.Fatalf("new address: %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := r.get("page.sites.test", "/"); rec.Code != 404 {
+		t.Fatalf("old address still served: %d", rec.Code)
+	}
+	// The freed address can be taken by another site.
+	c.mustStatus(200, "PATCH", "/api/v1/sites/"+b.ID, map[string]string{"slug": "page"})
+	if rec := r.get("page.sites.test", "/"); rec.Code != 503 {
+		t.Fatalf("freed address: %d", rec.Code)
+	}
+}
+
+func TestSiteBaseDomains(t *testing.T) {
+	r := newSiteRig(t)
+	c := r.owner
+	admin := r.e.user("root@x.io", domain.RoleAdmin)
+	const api = "/api/v1/admin/site-base-domains"
+	type baseDTO struct {
+		ID, Domain string
+		Enabled    bool
+		Primary    bool
+		FromConfig bool `json:"from_config"`
+		Serving    bool
+		Sites      int
+		TXTName    string  `json:"txt_name"`
+		TXTValue   string  `json:"txt_value"`
+		Error      *string `json:"last_error"`
+		RecType    string  `json:"record_type"`
+	}
+	var list struct{ Domains []baseDTO }
+	json.Unmarshal(admin.mustStatus(200, "GET", api, nil), &list)
+	if len(list.Domains) != 1 || list.Domains[0].Domain != "sites.test" || !list.Domains[0].Primary || !list.Domains[0].FromConfig || !list.Domains[0].Serving {
+		t.Fatalf("configured domain = %+v", list.Domains)
+	}
+	c.mustStatus(403, "GET", api, nil)
+	c.mustStatus(403, "POST", api, map[string]string{"domain": "pages.test"})
+
+	var blog struct{ ID string }
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Blog", "slug": "blog"}), &blog)
+	c.raw("POST", "/api/v1/sites/"+blog.ID+"/upload", zipOf(t, map[string]string{"index.html": "first"}), "application/zip")
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/sites/"+blog.ID+"/domains", map[string]string{"domain": "www.custom.dev"}), &struct{}{})
+	r.dns.set("_botforge-verify.www.custom.dev", "")
+
+	// Overlapping, panel and malformed domains are refused.
+	for _, bad := range []string{"sites.test", "a.sites.test", "example.com", "x.panel.example.com", "localhost", "nodot"} {
+		admin.mustStatus(400, "POST", api, map[string]string{"domain": bad})
+	}
+	var pages baseDTO
+	json.Unmarshal(admin.mustStatus(201, "POST", api, map[string]string{"domain": "Pages.Test", "label": "Pages"}), &pages)
+	if pages.Domain != "pages.test" || pages.Serving || pages.TXTName != "_botforge-domain.pages.test" || !strings.HasPrefix(pages.TXTValue, "botforge-domain=") || pages.RecType != "A" {
+		t.Fatalf("added = %+v", pages)
+	}
+	// Unverified: no sites can be placed there, nothing is served.
+	c.mustStatus(400, "POST", "/api/v1/sites", map[string]string{"name": "Blog", "slug": "blog", "domain_id": pages.ID})
+	admin.mustStatus(400, "PATCH", api+"/pages.test", map[string]bool{"primary": true})
+	json.Unmarshal(admin.mustStatus(200, "POST", api+"/pages.test/verify", nil), &pages)
+	if pages.Serving || pages.Error == nil {
+		t.Fatalf("verified without a record: %+v", pages)
+	}
+	r.dns.set(pages.TXTName, pages.TXTValue)
+	json.Unmarshal(admin.mustStatus(200, "POST", api+"/pages.test/verify", nil), &pages)
+	if !pages.Serving {
+		t.Fatalf("verify = %+v", pages)
+	}
+	// Custom domains cannot be claimed under a sites domain.
+	c.mustStatus(400, "POST", "/api/v1/sites/"+blog.ID+"/domains", map[string]string{"domain": "x.pages.test"})
+
+	// The same slug can live under each domain as a different site.
+	var info struct {
+		Domains []struct{ ID, Domain string } `json:"domains"`
+	}
+	json.Unmarshal(c.mustStatus(200, "GET", "/api/v1/sites-info", nil), &info)
+	if len(info.Domains) != 2 || info.Domains[0].Domain != "sites.test" {
+		t.Fatalf("sites-info domains = %+v", info.Domains)
+	}
+	var other struct{ ID, URL string }
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Blog 2", "slug": "blog", "domain_id": "pages.test"}), &other)
+	if other.URL != "http://blog.pages.test:8081" {
+		t.Fatalf("second domain URL = %s", other.URL)
+	}
+	c.raw("POST", "/api/v1/sites/"+other.ID+"/upload", zipOf(t, map[string]string{"index.html": "second"}), "application/zip")
+	if a, b := r.get("blog.sites.test", "/"), r.get("blog.pages.test", "/"); a.Body.String() != "first" || b.Body.String() != "second" {
+		t.Fatalf("per-domain slugs: %q %q", a.Body.String(), b.Body.String())
+	}
+	if rec := r.get("x.blog.pages.test", "/"); rec.Code != 404 {
+		t.Fatalf("nested host served: %d", rec.Code)
+	}
+	// Moving the first site onto the taken address is refused.
+	c.mustStatus(400, "PATCH", "/api/v1/sites/"+blog.ID, map[string]string{"domain_id": pages.ID})
+	c.mustStatus(200, "PATCH", "/api/v1/sites/"+blog.ID, map[string]string{"domain_id": pages.ID, "slug": "blog-one"})
+	if rec := r.get("blog-one.pages.test", "/"); rec.Body.String() != "first" {
+		t.Fatalf("moved site: %d %q", rec.Code, rec.Body.String())
+	}
+
+	// The primary domain cannot be turned off or removed; another can take over.
+	admin.mustStatus(400, "PATCH", api+"/sites.test", map[string]bool{"enabled": false})
+	admin.mustStatus(400, "DELETE", api+"/sites.test", nil)
+	admin.mustStatus(400, "PATCH", api+"/sites.test", map[string]bool{"primary": false})
+	json.Unmarshal(admin.mustStatus(200, "PATCH", api+"/pages.test", map[string]bool{"primary": true}), &pages)
+	if !pages.Primary {
+		t.Fatal("primary not changed")
+	}
+	var fresh struct{ URL string }
+	json.Unmarshal(c.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Fresh"}), &fresh)
+	if fresh.URL != "http://fresh.pages.test:8081" {
+		t.Fatalf("new site not on the new primary: %s", fresh.URL)
+	}
+	// Turning a domain off stops serving its sites; the sites remain.
+	admin.mustStatus(400, "PATCH", api+"/pages.test", map[string]bool{"primary": false})
+	admin.mustStatus(200, "PATCH", api+"/sites.test", map[string]bool{"primary": true})
+	admin.mustStatus(200, "PATCH", api+"/pages.test", map[string]bool{"enabled": false})
+	if rec := r.get("blog.pages.test", "/"); rec.Code != 404 {
+		t.Fatalf("disabled domain still served: %d", rec.Code)
+	}
+	c.mustStatus(200, "GET", "/api/v1/sites/"+other.ID, nil)
+	// A domain with sites cannot be removed; moving them is all or nothing.
+	admin.mustStatus(400, "DELETE", api+"/pages.test", nil)
+	admin.mustStatus(400, "POST", api+"/pages.test/move-sites", map[string]string{"to": "pages.test"})
+	var clash struct{ ID string }
+	json.Unmarshal(admin.mustStatus(201, "POST", "/api/v1/sites", map[string]string{"name": "Clash", "slug": "fresh"}), &clash)
+	admin.mustStatus(400, "POST", api+"/pages.test/move-sites", map[string]string{"to": "sites.test"})
+	if rec := r.get("fresh.sites.test", "/"); rec.Code != 503 {
+		t.Fatalf("a refused move changed addresses: %d", rec.Code)
+	}
+	admin.mustStatus(204, "DELETE", "/api/v1/sites/"+clash.ID, nil)
+	var moved struct{ Moved int }
+	json.Unmarshal(admin.mustStatus(200, "POST", api+"/pages.test/move-sites", map[string]string{"to": "sites.test"}), &moved)
+	if moved.Moved != 3 {
+		t.Fatalf("moved = %d", moved.Moved)
+	}
+	if rec := r.get("blog-one.sites.test", "/"); rec.Body.String() != "first" {
+		t.Fatalf("after move: %d %q", rec.Code, rec.Body.String())
+	}
+	admin.mustStatus(204, "DELETE", api+"/pages.test", nil)
+	json.Unmarshal(admin.mustStatus(200, "GET", api, nil), &list)
+	if len(list.Domains) != 1 {
+		t.Fatalf("after delete = %+v", list.Domains)
+	}
+}

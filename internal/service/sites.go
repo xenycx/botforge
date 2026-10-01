@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +50,17 @@ type SiteStore interface {
 	GetDomain(ctx context.Context, siteID, name string) (domain.SiteDomain, error)
 	RecordDomainCheck(ctx context.Context, name string, verifiedAt *int64, errMsg *string, nowMS int64) error
 	DeleteDomain(ctx context.Context, siteID, name string) error
-	SiteRoutes(ctx context.Context) (bySlug, byDomain map[string]domain.SiteRoute, err error)
+	SiteRoutes(ctx context.Context) (domain.SiteRouteTable, error)
+	ListBaseDomains(ctx context.Context) ([]domain.SiteBaseDomain, error)
+	GetBaseDomain(ctx context.Context, idOrName string) (domain.SiteBaseDomain, error)
+	EnsureBaseDomains(ctx context.Context, seeds []domain.SiteBaseDomain, nowMS int64) error
+	InsertBaseDomain(ctx context.Context, d domain.SiteBaseDomain) error
+	UpdateBaseDomain(ctx context.Context, d domain.SiteBaseDomain) error
+	SetPrimaryBaseDomain(ctx context.Context, id string, nowMS int64) error
+	RecordBaseDomainCheck(ctx context.Context, id string, verifiedAt *int64, errMsg *string, nowMS int64) error
+	MoveSitesToBaseDomain(ctx context.Context, fromID, toID string, nowMS int64) (int, error)
+	DeleteBaseDomain(ctx context.Context, id string) error
+	CountDomainsUnder(ctx context.Context, name string, verifiedOnly bool) (int, error)
 	PublicSitePage(ctx context.Context, siteID string) (domain.PublicSitePage, error)
 }
 
@@ -61,38 +72,41 @@ type TXTResolver interface {
 // Site hosting limits that are not configurable.
 const (
 	MaxDomainsPerSite = 10
+	MaxBaseDomains    = 50
 	keepReleases      = 5 // the serving release plus up to four for rollback
 	maxSiteFiles      = 20000
 	domainTXTPrefix   = "_botforge-verify."
 	domainTXTValue    = "botforge-verify="
+	baseTXTPrefix     = "_botforge-domain."
+	baseTXTValue      = "botforge-domain="
 )
 
 // SiteService manages static sites. Files are served by the separate sites
 // listener (package sitehost), never by the panel's own origin: sites contain
 // arbitrary user HTML and scripts.
 type SiteService struct {
-	Store      SiteStore
-	Bots       *BotService
-	OAuth      *OAuthService  // optional: GitHub deployments
-	GH         *github.Client // optional: GitHub deployments
-	Dir        string         // one directory per site, one sub-directory per release
-	BaseURL    string         // e.g. https://sites.example.com; a site is served at <slug>.<host>
-	DNSTarget  string         // CNAME target shown for custom domains; default: the BaseURL host
-	PanelHost  string         // the panel's own host name, never assignable to a site
-	MaxBytes   int64          // largest release
-	MaxPerUser int            // sites an account may create; 0 = unlimited
-	Resolver   TXTResolver    // nil: net.DefaultResolver
-	Log        *slog.Logger
-	Now        func() time.Time
+	Store        SiteStore
+	Bots         *BotService
+	OAuth        *OAuthService  // optional: GitHub deployments
+	GH           *github.Client // optional: GitHub deployments
+	Dir          string         // one directory per site, one sub-directory per release
+	BaseURL      string         // e.g. https://sites.example.com: scheme, port and primary base domain
+	ExtraDomains []string       // further configured base domains, trusted without DNS proof
+	DNSTarget    string         // CNAME target shown for custom domains; default: the site's own host
+	PanelHost    string         // the panel's own host name, never assignable to a site
+	MaxBytes     int64          // largest release
+	MaxPerUser   int            // sites an account may create; 0 = unlimited
+	Resolver     TXTResolver    // nil: net.DefaultResolver
+	Log          *slog.Logger
+	Now          func() time.Time
 
 	root    *filesystem.Manager
 	drafts  *filesystem.Manager
 	baseCtx context.Context
 	wg      sync.WaitGroup
 
-	mu       sync.RWMutex
-	bySlug   map[string]domain.SiteRoute
-	byDomain map[string]domain.SiteRoute
+	mu     sync.RWMutex
+	routes domain.SiteRouteTable // Bases sorted most specific first
 
 	jobMu   sync.Mutex
 	jobs    map[string]*SiteJob
@@ -134,6 +148,9 @@ func (s *SiteService) Start(ctx context.Context) error {
 		return fmt.Errorf("site drafts directory: %w", err)
 	}
 	s.sweep(ctx)
+	if err := s.ensureBaseDomains(ctx); err != nil {
+		return fmt.Errorf("sites domains: %w", err)
+	}
 	if err := s.Reload(ctx); err != nil {
 		return err
 	}
@@ -209,14 +226,33 @@ func (s *SiteService) sweep(ctx context.Context) {
 	}
 }
 
+// ensureBaseDomains records the configured base domains and gives sites
+// created before base domains existed the primary one.
+func (s *SiteService) ensureBaseDomains(ctx context.Context) error {
+	var seeds []domain.SiteBaseDomain
+	seen := map[string]bool{}
+	for _, d := range append([]string{s.configDomain()}, s.ExtraDomains...) {
+		if d = normalizeHost(d); d != "" && !seen[d] {
+			seen[d] = true
+			seeds = append(seeds, domain.SiteBaseDomain{ID: uuid.NewString(), Domain: d, Token: randHex(16)})
+		}
+	}
+	return s.Store.EnsureBaseDomains(ctx, seeds, s.now().UnixMilli())
+}
+
 // Reload rebuilds the host routing table from the database.
 func (s *SiteService) Reload(ctx context.Context) error {
-	bySlug, byDomain, err := s.Store.SiteRoutes(ctx)
+	t, err := s.Store.SiteRoutes(ctx)
 	if err != nil {
 		return err
 	}
+	// The most specific base domain wins (sites.example.com before
+	// example.com), although overlapping base domains are refused anyway.
+	sort.SliceStable(t.Bases, func(i, j int) bool {
+		return strings.Count(t.Bases[i].Domain, ".") > strings.Count(t.Bases[j].Domain, ".")
+	})
 	s.mu.Lock()
-	s.bySlug, s.byDomain = bySlug, byDomain
+	s.routes = t
 	s.mu.Unlock()
 	return nil
 }
@@ -229,8 +265,8 @@ func (s *SiteService) reloadSoon() {
 	}
 }
 
-// SitesDomain is the host part of BaseURL.
-func (s *SiteService) SitesDomain() string {
+// configDomain is the host part of BaseURL.
+func (s *SiteService) configDomain() string {
 	u, err := url.Parse(s.BaseURL)
 	if err != nil {
 		return ""
@@ -238,18 +274,37 @@ func (s *SiteService) SitesDomain() string {
 	return strings.ToLower(u.Hostname())
 }
 
-// SiteURL is a site's default address.
-func (s *SiteService) SiteURL(slug string) string {
+// SitesDomain is the primary base domain: where new sites go by default.
+func (s *SiteService) SitesDomain() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, b := range s.routes.Bases {
+		if b.Primary {
+			return b.Domain
+		}
+	}
+	return s.configDomain()
+}
+
+// SiteURL is the address of slug under a base domain ("" = the primary one),
+// on the scheme and port of BaseURL.
+func (s *SiteService) SiteURL(slug, base string) string {
 	u, err := url.Parse(s.BaseURL)
 	if err != nil || u.Host == "" {
 		return ""
 	}
-	host := slug + "." + u.Hostname()
+	if base == "" {
+		base = s.SitesDomain()
+	}
+	host := slug + "." + base
 	if p := u.Port(); p != "" {
 		host += ":" + p
 	}
 	return u.Scheme + "://" + host
 }
+
+// URLOf is a site's default address.
+func (s *SiteService) URLOf(st domain.Site) string { return s.SiteURL(st.Slug, st.BaseDomain) }
 
 // DomainURL is the address of a custom domain, on the same scheme as sites.
 func (s *SiteService) DomainURL(name string) string {
@@ -263,16 +318,34 @@ func (s *SiteService) DomainURL(name string) string {
 // TrafficRecord is the DNS record that sends a custom domain's visitors to
 // this server: a CNAME to a host name, or an A/AAAA record when the only
 // known target is an address. An empty target means "this server's public
-// address" (unknown to the panel).
-func (s *SiteService) TrafficRecord(slug string) (kind, target string) {
+// address" (unknown to the panel). base is the site's base domain ("" = the
+// primary one).
+func (s *SiteService) TrafficRecord(slug, base string) (kind, target string) {
 	t := s.DNSTarget
 	if t == "" {
-		if d := s.SitesDomain(); d != "" && d != "localhost" {
-			t = slug + "." + d
+		if base == "" {
+			base = s.SitesDomain()
+		}
+		if base != "" && base != "localhost" {
+			t = slug + "." + base
 		} else {
 			t = s.PanelHost
 		}
 	}
+	return recordFor(t)
+}
+
+// BaseDomainRecord is the DNS record that sends a base domain's visitors
+// (the domain and *.domain) to this server.
+func (s *SiteService) BaseDomainRecord(d domain.SiteBaseDomain) (kind, target string) {
+	t := d.DNSTarget
+	if t == "" {
+		t = s.DNSTarget
+	}
+	return recordFor(t)
+}
+
+func recordFor(t string) (kind, target string) {
 	if ip := net.ParseIP(t); ip != nil {
 		if ip.To4() == nil {
 			return "AAAA", t
@@ -285,19 +358,22 @@ func (s *SiteService) TrafficRecord(slug string) (kind, target string) {
 	return "CNAME", t
 }
 
-// Resolve maps a request host (with or without port) to a site route.
+// Resolve maps a request host (with or without port) to a site route: a
+// verified custom domain, or <slug>.<base domain> for a served base domain.
 func (s *SiteService) Resolve(host string) (domain.SiteRoute, bool) {
 	host = normalizeHost(host)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if base := s.SitesDomain(); base != "" {
-		if slug, ok := strings.CutSuffix(host, "."+base); ok && !strings.Contains(slug, ".") {
-			r, ok := s.bySlug[slug]
+	if r, ok := s.routes.ByDomain[host]; ok {
+		return r, true
+	}
+	for _, b := range s.routes.Bases {
+		if slug, ok := strings.CutSuffix(host, "."+b.Domain); ok && slug != "" && !strings.Contains(slug, ".") {
+			r, ok := s.routes.BySlug[domain.SlugKey(b.ID, slug)]
 			return r, ok
 		}
 	}
-	r, ok := s.byDomain[host]
-	return r, ok
+	return domain.SiteRoute{}, false
 }
 
 // TLSAllowed tells an on-demand TLS proxy (Caddy's "ask") whether to obtain
@@ -439,6 +515,7 @@ var (
 type CreateSiteInput struct {
 	Name        string
 	Slug        string
+	DomainID    string // base domain id or name; "" = the primary one
 	WorkspaceID string
 	SPA         bool
 	BotID       string // optional: creates the one public page attached to this bot
@@ -454,6 +531,47 @@ func slugFrom(name string) string {
 		s = strings.Trim("site-"+s, "-")
 	}
 	return s
+}
+
+func validateSlug(slug string) error {
+	if !slugRe.MatchString(slug) || strings.Contains(slug, "--") {
+		return domain.Invalid("the address must be 3-40 lower-case letters, digits and single hyphens, starting and ending with a letter or digit")
+	}
+	if reservedSlugs[slug] {
+		return domain.Invalid("that address is reserved; choose another")
+	}
+	return nil
+}
+
+// baseFor returns the base domain a site may be placed under (id or name;
+// "" is the primary one). Only enabled, verified domains take sites.
+func (s *SiteService) baseFor(ctx context.Context, idOrName string) (domain.SiteBaseDomain, error) {
+	var b domain.SiteBaseDomain
+	if idOrName == "" {
+		list, err := s.Store.ListBaseDomains(ctx)
+		if err != nil {
+			return b, err
+		}
+		for _, x := range list {
+			if x.Primary {
+				b = x
+			}
+		}
+		if b.ID == "" {
+			return b, domain.Invalid("no sites domain is set up on this panel")
+		}
+	} else {
+		var err error
+		if b, err = s.Store.GetBaseDomain(ctx, strings.ToLower(strings.TrimSpace(idOrName))); errors.Is(err, domain.ErrNotFound) {
+			return b, domain.Invalid("that sites domain does not exist")
+		} else if err != nil {
+			return b, err
+		}
+	}
+	if !b.Serving() {
+		return b, domain.Invalid("new addresses cannot be created under " + b.Domain + " right now")
+	}
+	return b, nil
 }
 
 func randHex(n int) string {
@@ -504,11 +622,12 @@ func (s *SiteService) Create(ctx context.Context, actor domain.User, in CreateSi
 	if slug == "" {
 		slug, auto = slugFrom(name), true
 	}
-	if !slugRe.MatchString(slug) || strings.Contains(slug, "--") {
-		return domain.Site{}, domain.Invalid("the address must be 3-40 lower-case letters, digits and single hyphens, starting and ending with a letter or digit")
+	if err := validateSlug(slug); err != nil {
+		return domain.Site{}, err
 	}
-	if reservedSlugs[slug] {
-		return domain.Site{}, domain.Invalid("that address is reserved; choose another")
+	base, err := s.baseFor(ctx, in.DomainID)
+	if err != nil {
+		return domain.Site{}, err
 	}
 	now := s.now().UnixMilli()
 	mode := in.Mode
@@ -521,7 +640,7 @@ func (s *SiteService) Create(ctx context.Context, actor domain.User, in CreateSi
 	if mode == "page" && botID == nil {
 		return domain.Site{}, domain.Invalid("a generated public page must be attached to a bot")
 	}
-	st := domain.Site{ID: uuid.NewString(), WorkspaceID: wsID, OwnerID: actor.ID, BotID: botID, Name: name, Slug: slug, SPA: in.SPA, CleanURLs: true,
+	st := domain.Site{ID: uuid.NewString(), WorkspaceID: wsID, OwnerID: actor.ID, BotID: botID, Name: name, Slug: slug, DomainID: &base.ID, SPA: in.SPA, CleanURLs: true,
 		Mode: mode, PageTitle: name, PageDescription: "A Discord community powered by " + name + ".", PageTheme: "midnight", PageAccent: "#5865f2",
 		CreatedAtMS: now, UpdatedAtMS: now}
 	for attempt := 0; ; attempt++ {
@@ -530,7 +649,7 @@ func (s *SiteService) Create(ctx context.Context, actor domain.User, in CreateSi
 			break
 		}
 		if !auto || attempt >= 4 {
-			return domain.Site{}, domain.Invalid("that address is already taken; choose another")
+			return domain.Site{}, domain.Invalid("that address is already taken on " + base.Domain + "; choose another")
 		}
 		base := slug
 		if len(base) > 34 {
@@ -556,6 +675,8 @@ type RepoInput struct {
 // UpdateSiteInput is a partial change; nil fields are unchanged.
 type UpdateSiteInput struct {
 	Name            *string
+	Slug            *string // the address: <slug>.<base domain>
+	DomainID        *string // base domain id or name
 	SPA             *bool
 	CleanURLs       *bool
 	WorkspaceID     *string
@@ -594,6 +715,29 @@ func (s *SiteService) Update(ctx context.Context, actor domain.User, id string, 
 		if st.Name, err = validateName(*in.Name); err != nil {
 			return domain.Site{}, err
 		}
+	}
+	addressBase := st.BaseDomain
+	if in.Slug != nil {
+		if slug := strings.ToLower(strings.TrimSpace(*in.Slug)); slug != st.Slug {
+			if err := validateSlug(slug); err != nil {
+				return domain.Site{}, err
+			}
+			st.Slug = slug
+		}
+	}
+	if in.DomainID != nil && *in.DomainID != "" && (st.DomainID == nil || (*in.DomainID != *st.DomainID && *in.DomainID != st.BaseDomain)) {
+		b, err := s.baseFor(ctx, *in.DomainID)
+		if err != nil {
+			return domain.Site{}, err
+		}
+		st.DomainID, addressBase = &b.ID, b.Domain
+	}
+	if st.DomainID == nil {
+		b, err := s.baseFor(ctx, "")
+		if err != nil {
+			return domain.Site{}, err
+		}
+		st.DomainID, addressBase = &b.ID, b.Domain
 	}
 	if in.SPA != nil {
 		st.SPA = *in.SPA
@@ -661,7 +805,9 @@ func (s *SiteService) Update(ctx context.Context, actor domain.User, id string, 
 		}
 	}
 	st.UpdatedAtMS = s.now().UnixMilli()
-	if err := s.Store.UpdateSite(ctx, st); err != nil {
+	if err := s.Store.UpdateSite(ctx, st); errors.Is(err, domain.ErrConflict) {
+		return domain.Site{}, domain.Invalid("that address is already taken on " + addressBase + "; choose another")
+	} else if err != nil {
 		return domain.Site{}, err
 	}
 	s.reloadSoon()
@@ -1161,7 +1307,9 @@ func (s *SiteService) AddDomain(ctx context.Context, actor domain.User, id, name
 	if p := normalizeHost(s.PanelHost); p != "" && (d == p || strings.HasSuffix(d, "."+p)) {
 		return domain.SiteDomain{}, domain.Invalid("the panel's own domain (and its subdomains) cannot host a site")
 	}
-	if base := s.SitesDomain(); base != "" && (d == base || strings.HasSuffix(d, "."+base)) {
+	if base, err := s.underBaseDomain(ctx, d); err != nil {
+		return domain.SiteDomain{}, err
+	} else if base != "" {
 		return domain.SiteDomain{}, domain.Invalid("addresses under " + base + " are assigned automatically; change the site address instead")
 	}
 	existing, err := s.Store.ListDomains(ctx, id)
@@ -1191,7 +1339,14 @@ func (s *SiteService) VerifyDomain(ctx context.Context, actor domain.User, id, n
 	if err != nil {
 		return domain.SiteDomain{}, err
 	}
-	ok, msg := s.checkTXT(ctx, d)
+	txtName, txtValue := VerificationRecord(d)
+	ok, msg := s.checkTXT(ctx, txtName, txtValue)
+	// A base domain added after this claim owns every name below it.
+	if base, err := s.underBaseDomain(ctx, d.Domain); err != nil {
+		return domain.SiteDomain{}, err
+	} else if base != "" {
+		ok, msg = false, d.Domain+" is under the sites domain "+base+" and cannot be a custom domain; remove it"
+	}
 	now := s.now().UnixMilli()
 	var at *int64
 	var errMsg *string
@@ -1207,14 +1362,31 @@ func (s *SiteService) VerifyDomain(ctx context.Context, actor domain.User, id, n
 	return s.Store.GetDomain(ctx, id, d.Domain)
 }
 
-func (s *SiteService) checkTXT(ctx context.Context, d domain.SiteDomain) (bool, string) {
+// underBaseDomain returns the base domain (in any state) that name equals or
+// is below, or "".
+func (s *SiteService) underBaseDomain(ctx context.Context, name string) (string, error) {
+	bases, err := s.Store.ListBaseDomains(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, b := range bases {
+		if name == b.Domain || strings.HasSuffix(name, "."+b.Domain) {
+			return b.Domain, nil
+		}
+	}
+	if b := s.configDomain(); b != "" && (name == b || strings.HasSuffix(name, "."+b)) {
+		return b, nil
+	}
+	return "", nil
+}
+
+func (s *SiteService) checkTXT(ctx context.Context, name, want string) (bool, string) {
 	r := s.Resolver
 	if r == nil {
 		r = net.DefaultResolver
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	name, want := VerificationRecord(d)
 	recs, err := r.LookupTXT(ctx, name)
 	if err != nil {
 		var dnsErr *net.DNSError
@@ -1243,13 +1415,36 @@ func (s *SiteService) recheckDomains(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		ok, msg := s.checkTXT(ctx, d)
+		txtName, txtValue := VerificationRecord(d)
+		ok, msg := s.checkTXT(ctx, txtName, txtValue)
 		var errMsg *string
 		if !ok {
 			errMsg = &msg
 		}
 		if err := s.Store.RecordDomainCheck(ctx, d.Domain, nil, errMsg, s.now().UnixMilli()); err != nil {
 			s.warn("record domain check", err)
+		}
+	}
+	bases, err := s.Store.ListBaseDomains(ctx)
+	if err != nil {
+		s.warn("list sites domains", err)
+		return
+	}
+	for _, b := range bases {
+		if ctx.Err() != nil {
+			return
+		}
+		if b.FromConfig || b.VerifiedAtMS == nil {
+			continue
+		}
+		txtName, txtValue := BaseDomainVerificationRecord(b)
+		ok, msg := s.checkTXT(ctx, txtName, txtValue)
+		var errMsg *string
+		if !ok {
+			errMsg = &msg
+		}
+		if err := s.Store.RecordBaseDomainCheck(ctx, b.ID, nil, errMsg, s.now().UnixMilli()); err != nil {
+			s.warn("record sites domain check", err)
 		}
 	}
 }
@@ -1260,6 +1455,257 @@ func (s *SiteService) RemoveDomain(ctx context.Context, actor domain.User, id, n
 		return err
 	}
 	if err := s.Store.DeleteDomain(ctx, id, strings.ToLower(name)); err != nil {
+		return err
+	}
+	s.reloadSoon()
+	return nil
+}
+
+// ---- base domains (administrators) ----
+
+// BaseDomainVerificationRecord is the DNS TXT record proving control of a
+// base domain.
+func BaseDomainVerificationRecord(d domain.SiteBaseDomain) (name, value string) {
+	return baseTXTPrefix + d.Domain, baseTXTValue + d.Token
+}
+
+// ServingBaseDomains lists the base domains new sites can be placed under,
+// the primary first.
+func (s *SiteService) ServingBaseDomains(ctx context.Context) ([]domain.SiteBaseDomain, error) {
+	list, err := s.Store.ListBaseDomains(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := list[:0]
+	for _, b := range list {
+		if b.Serving() {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
+
+// ListBaseDomains returns every base domain (administrators only).
+func (s *SiteService) ListBaseDomains(ctx context.Context, actor domain.User) ([]domain.SiteBaseDomain, error) {
+	if !actor.IsAdmin() {
+		return nil, domain.ErrForbidden
+	}
+	return s.Store.ListBaseDomains(ctx)
+}
+
+func (s *SiteService) adminBaseDomain(ctx context.Context, actor domain.User, name string) (domain.SiteBaseDomain, error) {
+	if !actor.IsAdmin() {
+		return domain.SiteBaseDomain{}, domain.ErrForbidden
+	}
+	return s.Store.GetBaseDomain(ctx, strings.ToLower(strings.TrimSpace(name)))
+}
+
+// overlaps reports whether a and b are the same host or one is below the
+// other.
+func overlaps(a, b string) bool {
+	return a == b || strings.HasSuffix(a, "."+b) || strings.HasSuffix(b, "."+a)
+}
+
+func cleanDNSTarget(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if ip := net.ParseIP(v); ip != nil {
+		return ip.String(), nil
+	}
+	d, err := NormalizeDomain(v)
+	if err != nil {
+		return "", domain.Invalid("the DNS target must be a host name or an IP address")
+	}
+	return d, nil
+}
+
+// BaseDomainInput describes a new base domain.
+type BaseDomainInput struct {
+	Domain    string
+	Label     string
+	DNSTarget string
+}
+
+// AddBaseDomain registers a domain sites can live under. It is served once a
+// TXT record proves the administrator controls it.
+func (s *SiteService) AddBaseDomain(ctx context.Context, actor domain.User, in BaseDomainInput) (domain.SiteBaseDomain, error) {
+	if !actor.IsAdmin() {
+		return domain.SiteBaseDomain{}, domain.ErrForbidden
+	}
+	d, err := NormalizeDomain(in.Domain)
+	if err != nil {
+		return domain.SiteBaseDomain{}, err
+	}
+	// A site could set cookies for any parent of its own host, so the panel
+	// may be neither the domain, below it, nor above it.
+	if p := normalizeHost(s.PanelHost); p != "" && overlaps(d, p) {
+		return domain.SiteBaseDomain{}, domain.Invalid("the panel's own domain, its parent domains and its subdomains cannot be a sites domain; sites could set cookies for the panel")
+	}
+	existing, err := s.Store.ListBaseDomains(ctx)
+	if err != nil {
+		return domain.SiteBaseDomain{}, err
+	}
+	if len(existing) >= MaxBaseDomains {
+		return domain.SiteBaseDomain{}, domain.Invalid(fmt.Sprintf("a panel can have at most %d sites domains", MaxBaseDomains))
+	}
+	for _, b := range existing {
+		if b.Domain == d {
+			return domain.SiteBaseDomain{}, domain.Invalid(d + " is already a sites domain")
+		}
+		if overlaps(d, b.Domain) {
+			return domain.SiteBaseDomain{}, domain.Invalid(d + " overlaps the sites domain " + b.Domain + "; a sites domain cannot be above or below another")
+		}
+	}
+	if n, err := s.Store.CountDomainsUnder(ctx, d, true); err != nil {
+		return domain.SiteBaseDomain{}, err
+	} else if n > 0 {
+		return domain.SiteBaseDomain{}, domain.Invalid(fmt.Sprintf("%d verified custom domain(s) of sites are %s or below it; remove them first", n, d))
+	}
+	label, err := cleanPageText(in.Label, 64, "label")
+	if err != nil {
+		return domain.SiteBaseDomain{}, err
+	}
+	target, err := cleanDNSTarget(in.DNSTarget)
+	if err != nil {
+		return domain.SiteBaseDomain{}, err
+	}
+	now := s.now().UnixMilli()
+	b := domain.SiteBaseDomain{ID: uuid.NewString(), Domain: d, Enabled: true, Label: label, DNSTarget: target, Token: randHex(16),
+		CreatedAtMS: now, UpdatedAtMS: now}
+	if err := s.Store.InsertBaseDomain(ctx, b); errors.Is(err, domain.ErrConflict) {
+		return domain.SiteBaseDomain{}, domain.Invalid(d + " is already a sites domain")
+	} else if err != nil {
+		return domain.SiteBaseDomain{}, err
+	}
+	return s.Store.GetBaseDomain(ctx, b.ID)
+}
+
+// VerifyBaseDomain checks the TXT record now and, when it matches, starts
+// serving sites under the domain.
+func (s *SiteService) VerifyBaseDomain(ctx context.Context, actor domain.User, name string) (domain.SiteBaseDomain, error) {
+	b, err := s.adminBaseDomain(ctx, actor, name)
+	if err != nil || b.FromConfig {
+		return b, err
+	}
+	txtName, txtValue := BaseDomainVerificationRecord(b)
+	ok, msg := s.checkTXT(ctx, txtName, txtValue)
+	if ok {
+		// Custom domains verified while this one was pending stay the
+		// sites'; refusing here keeps one owner per host name.
+		if n, err := s.Store.CountDomainsUnder(ctx, b.Domain, true); err != nil {
+			return b, err
+		} else if n > 0 {
+			ok, msg = false, fmt.Sprintf("%d verified custom domain(s) of sites are %s or below it; remove them first", n, b.Domain)
+		}
+	}
+	now := s.now().UnixMilli()
+	var at *int64
+	var errMsg *string
+	if ok {
+		at = &now
+	} else {
+		errMsg = &msg
+	}
+	if err := s.Store.RecordBaseDomainCheck(ctx, b.ID, at, errMsg, now); err != nil {
+		return b, err
+	}
+	s.reloadSoon()
+	return s.Store.GetBaseDomain(ctx, b.ID)
+}
+
+// BaseDomainUpdate is a partial change; nil fields are unchanged.
+type BaseDomainUpdate struct {
+	Enabled   *bool
+	Primary   *bool
+	Label     *string
+	DNSTarget *string
+}
+
+// UpdateBaseDomain changes a base domain's settings. The primary domain
+// cannot be turned off; make another one primary first.
+func (s *SiteService) UpdateBaseDomain(ctx context.Context, actor domain.User, name string, in BaseDomainUpdate) (domain.SiteBaseDomain, error) {
+	b, err := s.adminBaseDomain(ctx, actor, name)
+	if err != nil {
+		return b, err
+	}
+	if in.Label != nil {
+		if b.Label, err = cleanPageText(*in.Label, 64, "label"); err != nil {
+			return b, err
+		}
+	}
+	if in.DNSTarget != nil {
+		if b.DNSTarget, err = cleanDNSTarget(*in.DNSTarget); err != nil {
+			return b, err
+		}
+	}
+	if in.Enabled != nil {
+		b.Enabled = *in.Enabled
+	}
+	makePrimary := in.Primary != nil && *in.Primary && !b.Primary
+	switch {
+	case in.Primary != nil && !*in.Primary && b.Primary:
+		return b, domain.Invalid("make another sites domain the primary one instead")
+	case makePrimary && !b.Serving():
+		return b, domain.Invalid("only an enabled, verified sites domain can be the primary one")
+	case !b.Enabled && b.Primary:
+		return b, domain.Invalid("the primary sites domain cannot be turned off; make another one primary first")
+	}
+	b.UpdatedAtMS = s.now().UnixMilli()
+	if err := s.Store.UpdateBaseDomain(ctx, b); err != nil {
+		return b, err
+	}
+	if makePrimary {
+		if err := s.Store.SetPrimaryBaseDomain(ctx, b.ID, b.UpdatedAtMS); err != nil {
+			return b, err
+		}
+	}
+	s.reloadSoon()
+	return s.Store.GetBaseDomain(ctx, b.ID)
+}
+
+// MoveBaseDomainSites moves every site from one base domain to another,
+// keeping their slugs. Nothing moves when any slug is taken there.
+func (s *SiteService) MoveBaseDomainSites(ctx context.Context, actor domain.User, from, to string) (int, error) {
+	src, err := s.adminBaseDomain(ctx, actor, from)
+	if err != nil {
+		return 0, err
+	}
+	dst, err := s.baseFor(ctx, to)
+	if err != nil {
+		return 0, err
+	}
+	if dst.ID == src.ID {
+		return 0, domain.Invalid("choose a different sites domain to move to")
+	}
+	n, err := s.Store.MoveSitesToBaseDomain(ctx, src.ID, dst.ID, s.now().UnixMilli())
+	if errors.Is(err, domain.ErrConflict) {
+		return 0, domain.Invalid("some of these sites' addresses are already taken on " + dst.Domain + "; change those addresses first. Nothing was moved.")
+	} else if err != nil {
+		return 0, err
+	}
+	s.reloadSoon()
+	return n, nil
+}
+
+// DeleteBaseDomain removes a base domain no site uses. Configured domains
+// return on the next start, so they are removed from the configuration.
+func (s *SiteService) DeleteBaseDomain(ctx context.Context, actor domain.User, name string) error {
+	b, err := s.adminBaseDomain(ctx, actor, name)
+	switch {
+	case err != nil:
+		return err
+	case b.Primary:
+		return domain.Invalid("the primary sites domain cannot be removed; make another one primary first")
+	case b.FromConfig:
+		return domain.Invalid(b.Domain + " is set in the environment file (BOTPANEL_SITES_BASE_URL or BOTPANEL_SITES_DOMAINS); remove it there, or turn it off here")
+	case b.Sites > 0:
+		return domain.Invalid(fmt.Sprintf("%d site(s) still use %s; move them to another sites domain first", b.Sites, b.Domain))
+	}
+	if err := s.Store.DeleteBaseDomain(ctx, b.ID); errors.Is(err, domain.ErrNotFound) {
+		return domain.Invalid("sites still use " + b.Domain + "; move them first")
+	} else if err != nil {
 		return err
 	}
 	s.reloadSoon()

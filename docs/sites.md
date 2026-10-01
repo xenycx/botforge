@@ -23,8 +23,9 @@ There are two presentation modes on the same address:
   alter the live site; **Publish draft** snapshots and activates it.
 
 Switching mode never removes the generated-page settings or file releases.
-Domains and the public address remain the same. Use **Domains & releases** from
-Page Studio for DNS, GitHub deployments, ZIP uploads, rollback and settings.
+Domains and the public address remain the same. Use **Address, domains &
+releases** from Page Studio to change the address, and for DNS, GitHub
+deployments, ZIP uploads, rollback and settings.
 
 Generated pages may expose declarative bot widgets, but the switch is off by
 default. Enabling it publishes only the widget title, layout and validated
@@ -46,7 +47,9 @@ could read CSRF tokens, register service workers or act as the signed-in
 user. On their own host names they cannot.
 
 * Default address: `<slug>.<sites domain>`, for example
-  `https://docs.sites.example.com`, from `BOTPANEL_SITES_BASE_URL`.
+  `https://docs.sites.example.com`. The sites domain is the host of
+  `BOTPANEL_SITES_BASE_URL` unless the site was placed under another sites
+  domain (see [Addresses and sites domains](#addresses-and-sites-domains)).
 * Custom domains: any number of verified host names per site (up to 10).
 * The listener maps the request's `Host` to the site's current **release** and
   serves files from that directory through a descriptor-contained root: paths
@@ -74,7 +77,8 @@ that merely shares a parent with the panel (panel `panel.example.com`, sites
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BOTPANEL_SITES_LISTEN` | off (development: `127.0.0.1:8081`) | address of the sites listener; empty disables hosting |
-| `BOTPANEL_SITES_BASE_URL` | development: `http://localhost:8081` | origin whose host is the sites domain, e.g. `https://sites.example.com` |
+| `BOTPANEL_SITES_BASE_URL` | development: `http://localhost:8081` | origin whose host is the primary sites domain, e.g. `https://sites.example.com`; its scheme and port apply to every sites domain |
+| `BOTPANEL_SITES_DOMAINS` | none | further sites domains, comma-separated (e.g. `pages.example.net,example-sites.org`), trusted without a DNS record |
 | `BOTPANEL_SITES_DIR` | `/var/lib/botpanel/sites` | releases, one directory per site |
 | `BOTPANEL_SITE_MAX_BYTES` | 104857600 (100 MiB) | largest release, uncompressed (1 MiB–4 GiB) |
 | `BOTPANEL_MAX_SITES_PER_USER` | 10 | sites an account may create; 0 = unlimited; administrators are exempt |
@@ -125,8 +129,105 @@ With nginx or another proxy, use a wildcard certificate for
 yourself; proxy everything that is not the panel host to the sites listener
 with the original `Host` header.
 
+### Several sites domains (Traefik, Cloudflare)
+
+So that a new sites domain needs no proxy change, send every host name the
+proxy does not otherwise know to the sites listener at the lowest priority.
+The panel decides what a host is: unknown host names get its "No site here"
+page. With Traefik's file provider:
+
+```yaml
+http:
+  routers:
+    sites-web:
+      entryPoints: [web]
+      rule: "HostRegexp(`^[a-z0-9.-]+$`)"
+      priority: 1
+      service: sites
+      middlewares: [to-https]
+    sites:
+      entryPoints: [websecure]
+      rule: "HostRegexp(`^[a-z0-9.-]+$`)"
+      priority: 1
+      service: sites
+      tls: {}
+  services:
+    sites:
+      loadBalancer:
+        servers: [{ url: "http://127.0.0.1:8081" }]
+```
+
+Give the panel's router (and any other service on the proxy) an explicit
+higher priority, for example `priority: 100`, so the catch-all never takes
+its host. Remove, or give a priority between the two, any older catch-all
+router that would compete with it.
+
+Every sites domain also needs a certificate for `<domain>` and `*.<domain>`.
+Behind Cloudflare with SSL mode *Full (strict)*, create a Cloudflare Origin
+Certificate for both names in that zone, install it on the server, and list it
+under `tls.certificates` in Traefik's dynamic configuration. For domains not
+on Cloudflare, use Traefik's ACME DNS-01 resolver for the wildcard, or Caddy's
+on-demand TLS above. BotForge does not install certificates or edit the proxy
+configuration.
+
+Per sites domain, at its DNS provider:
+
+1. `A *` (and `A @`) → the server's address, proxied when on Cloudflare.
+2. `TXT _botforge-domain` → `botforge-domain=<token>` (not needed for domains
+   in the environment file).
+3. Cloudflare: SSL/TLS mode *Full (strict)*. Universal SSL covers the apex and
+   one wildcard level, which is all sites use.
+4. In the panel: add the domain, then **Check DNS now**. Install the origin
+   certificate on the server.
+
 Enforcement boundary: TLS is terminated and certificates are issued by the
 reverse proxy. BotForge only answers whether a host name is allowed.
+
+## Addresses and sites domains
+
+A site's address is `<slug>.<sites domain>`. A slug is unique **per sites
+domain**, so `docs.sites.example.com` and `docs.pages.example.net` can be two
+different sites.
+
+**Changing the address.** Developers and up change a site's slug, and its
+sites domain when there is more than one, in the site's **Settings**. The move
+is immediate: the old address stops answering at once and any site may take
+it, so update links first. Verified custom domains keep working. The same
+rules as at creation apply: 3–40 lower-case letters, digits and single
+hyphens, not a reserved name (`www`, `api`, `admin`, `panel`, `mail`, …), and
+not already used under that sites domain.
+
+**Sites domains.** Administrators manage them in **Administration → Sites and
+domains → Sites domains**:
+
+* The host of `BOTPANEL_SITES_BASE_URL` and every `BOTPANEL_SITES_DOMAINS`
+  entry are added at start-up, marked *Environment*, and trusted without a DNS
+  record. The base URL's host is the first **primary** domain (the default for
+  new sites). If that host changes while it is still primary, the domain is
+  renamed, and its sites move with it, as before this feature existed.
+* **Add a domain** (for example one donated for the project) and create the
+  records shown: `TXT _botforge-domain.<domain>` with the value
+  `botforge-domain=<token>`, which proves control, and `*.<domain>` (plus
+  optionally `<domain>`) pointing at this server. Then press **Check DNS
+  now**. No site can use the domain, and nothing is served under it, until the
+  TXT record matches. Verified domains are re-checked every six hours; a
+  failed re-check is reported but does not stop serving.
+* **Make primary** changes where new sites go. **Turn off** stops serving every
+  site under the domain at its address on that domain (custom domains keep
+  working, nothing is deleted) and stops it being offered. The primary domain
+  cannot be turned off or removed.
+* **Move sites to…** moves every site from one domain to another, keeping
+  slugs. If any slug is taken on the target, nothing moves.
+* **Remove** works only for a domain no site uses that is not listed in the
+  environment file.
+
+Refused as a sites domain: the panel's host, any domain above it and any
+domain below it, because a site could set cookies for the panel. Also refused:
+a domain that is, is above, or is below another sites domain, and a domain
+that a verified custom domain already uses or sits under. Custom domains under
+any sites domain are refused too. Enforcement: application level, in the
+panel's host routing. Routing and certificates for each sites domain still
+have to be set up in the reverse proxy (below).
 
 ## Custom domains
 
@@ -143,8 +244,9 @@ reverse proxy. BotForge only answers whether a host name is allowed.
 
 Rules: a domain verified for one site cannot be added to another; an
 unverified claim does not reserve a domain (someone who verifies first wins).
-The panel's own host and its subdomains, and names under the sites domain, are
-refused. Verified domains are re-checked every six hours; a failed re-check is
+The panel's own host and its subdomains, and names under any sites domain, are
+refused (a custom domain verified before a sites domain was added above it
+must be removed before that sites domain can be verified). Verified domains are re-checked every six hours; a failed re-check is
 reported on the site page but does not stop serving (DNS hiccups must not take
 sites down). Remove the domain to stop serving it.
 
@@ -185,11 +287,11 @@ Uploaded content is not scanned for malware. These are listed in
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /sites-info` | whether hosting is on and how addresses look |
-| `GET /bots/{bot}/site`, `POST /bots/{bot}/site` `{slug?}` | get or create a bot's integrated site |
-| `GET /sites`, `POST /sites` `{name, slug?, workspace_id?, spa?}` | list and create standalone sites |
+| `GET /sites-info` | whether hosting is on, how addresses look, and the sites domains new sites can use (`domains`) |
+| `GET /bots/{bot}/site`, `POST /bots/{bot}/site` `{slug?, domain_id?}` | get or create a bot's integrated site |
+| `GET /sites`, `POST /sites` `{name, slug?, domain_id?, workspace_id?, spa?}` | list and create standalone sites (`domain_id`: a sites domain id or name; default the primary) |
 | `GET /sites/{id}` | site, role, domains with DNS records, releases, GitHub deploy state |
-| `PATCH /sites/{id}` | site, generated-page, privacy, mode and repository settings |
+| `PATCH /sites/{id}` | address (`slug`, `domain_id`), site, generated-page, privacy, mode and repository settings |
 | `DELETE /sites/{id}` | delete with every release and domain (workspace admin) |
 | `POST /sites/{id}/upload` | publish a ZIP (raw body) |
 | `GET/PUT/DELETE /sites/{id}/files...` | list, read, edit, move, extract and delete private draft files |
@@ -200,3 +302,8 @@ Uploaded content is not scanned for malware. These are listed in
 | `POST /sites/{id}/domains/{domain}/verify` | check its TXT record now |
 | `DELETE /sites/{id}/domains/{domain}` | remove it |
 | `GET /admin/sites`, `PATCH /admin/sites/{id}` `{disabled}` | administrators: list, suspend or restore |
+| `GET /admin/site-base-domains`, `POST /admin/site-base-domains` `{domain, label?, dns_target?}` | administrators: list sites domains with their DNS records, add one |
+| `POST /admin/site-base-domains/{domain}/verify` | check its `_botforge-domain` TXT record now |
+| `PATCH /admin/site-base-domains/{domain}` `{enabled?, primary?, label?, dns_target?}` | turn on or off, make primary, rename the label, set the DNS target shown |
+| `POST /admin/site-base-domains/{domain}/move-sites` `{to}` | move every site to another sites domain (all or nothing) |
+| `DELETE /admin/site-base-domains/{domain}` | remove an unused, non-primary domain not set in the environment file |

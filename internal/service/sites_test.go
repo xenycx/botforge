@@ -14,7 +14,7 @@ func TestTrafficRecord(t *testing.T) {
 		{&SiteService{BaseURL: "http://localhost:8081"}, "A", ""},
 		{&SiteService{BaseURL: "http://localhost:8081", PanelHost: "panel.example.com"}, "CNAME", "panel.example.com"},
 	} {
-		if k, v := tc.s.TrafficRecord("docs"); k != tc.kind || v != tc.want {
+		if k, v := tc.s.TrafficRecord("docs", ""); k != tc.kind || v != tc.want {
 			t.Errorf("%s/%s/%s: %s %s", tc.s.BaseURL, tc.s.DNSTarget, tc.s.PanelHost, k, v)
 		}
 	}

@@ -29,8 +29,9 @@ static binary, Docker for isolation.
   sharing, and administrator views of every workspace, account and deployment
   (`docs/workspaces.md`)
 * **Static site hosting** on a separate listener: ZIP or GitHub publishing,
-  instant rollback, custom domains with DNS verification, on-demand TLS via
-  the reverse proxy (`docs/sites.md`)
+  instant rollback, editable site addresses, several sites domains (added at
+  runtime with DNS verification), custom domains with DNS verification,
+  on-demand TLS via the reverse proxy (`docs/sites.md`)
 * Integrated **Bot Sites** in every Discord bot: a generated public page with
   custom HTML/CSS and opt-in live widgets, or full HTML/CSS/JS files edited in
   a private draft and published as immutable releases

@@ -123,3 +123,27 @@ func TestOAuthConfigValidation(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+func TestSitesDomains(t *testing.T) {
+	base := map[string]string{"BOTPANEL_SITES_LISTEN": "127.0.0.1:8081", "BOTPANEL_SITES_BASE_URL": "https://sites.example.com",
+		"BOTPANEL_PUBLIC_URL": "https://panel.example.org"}
+	with := func(v string) map[string]string {
+		m := map[string]string{"BOTPANEL_SITES_DOMAINS": v}
+		for k, x := range base {
+			m[k] = x
+		}
+		return m
+	}
+	c, err := Load(env(with(" Pages.Example.NET., ,other-sites.io")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.SitesDomains) != 2 || c.SitesDomains[0] != "pages.example.net" || c.SitesDomains[1] != "other-sites.io" {
+		t.Fatalf("domains = %q", c.SitesDomains)
+	}
+	for _, bad := range []string{"example.com", "a.sites.example.com", "example.org", "x.panel.example.org", "nodot", "a_b.io", "pages.io,pages.io", "bücher.de"} {
+		if _, err := Load(env(with(bad))); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -114,7 +115,11 @@ type Config struct {
 	// SitesBaseURL defines the default site address: a site with slug "docs"
 	// is served at <scheme>://docs.<host>[:port]. Point a wildcard DNS record
 	// (*.host) at the reverse proxy in front of SitesListen.
-	SitesBaseURL    string
+	SitesBaseURL string
+	// SitesDomains are further base domains sites can live under, trusted
+	// like SitesBaseURL's host (administrators can add more, verified by DNS,
+	// at runtime).
+	SitesDomains    []string
 	SitesDir        string // releases, one directory per site
 	SiteMaxBytes    int64  // largest release (uncompressed)
 	MaxSitesPerUser int    // sites an account may create (0 = unlimited)
@@ -347,6 +352,11 @@ func LoadLookup(look Lookup) (Config, error) {
 	if v := strings.TrimRight(strings.TrimSpace(getenv("BOTPANEL_SITES_BASE_URL")), "/"); v != "" {
 		c.SitesBaseURL = v
 	}
+	for _, d := range strings.Split(getenv("BOTPANEL_SITES_DOMAINS"), ",") {
+		if d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), "."); d != "" {
+			c.SitesDomains = append(c.SitesDomains, d)
+		}
+	}
 	if v := strings.TrimSpace(getenv("BOTPANEL_SITES_DIR")); v != "" {
 		c.SitesDir = v
 	}
@@ -452,6 +462,7 @@ func (c Config) validateSites() []error {
 			}
 		}
 	}
+	errs = append(errs, c.validateSitesDomains()...)
 	if c.SitesDir == "" || strings.ContainsRune(c.SitesDir, 0) {
 		errs = append(errs, errors.New("sites directory is empty or invalid"))
 	}
@@ -460,6 +471,42 @@ func (c Config) validateSites() []error {
 	}
 	if c.MaxSitesPerUser < 0 {
 		errs = append(errs, errors.New("BOTPANEL_MAX_SITES_PER_USER cannot be negative (0 means unlimited)"))
+	}
+	return errs
+}
+
+var hostLabelRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// validateSitesDomains checks BOTPANEL_SITES_DOMAINS: host names that overlap
+// neither each other, the primary sites domain, nor the panel's host (a site
+// could set cookies for any parent of its own host).
+func (c Config) validateSitesDomains() []error {
+	var errs []error
+	overlaps := func(a, b string) bool { return a == b || strings.HasSuffix(a, "."+b) || strings.HasSuffix(b, "."+a) }
+	panel := ""
+	if p, err := url.Parse(c.PublicURL); err == nil {
+		panel = strings.ToLower(p.Hostname())
+	}
+	seen := []string{c.SitesDomain()}
+	for _, d := range c.SitesDomains {
+		labels := strings.Split(d, ".")
+		valid := len(d) <= 253 && len(labels) >= 2
+		for _, l := range labels {
+			valid = valid && hostLabelRe.MatchString(l)
+		}
+		if !valid {
+			errs = append(errs, fmt.Errorf("BOTPANEL_SITES_DOMAINS: %q is not a host name such as pages.example.net (use punycode for international names)", d))
+			continue
+		}
+		if panel != "" && overlaps(d, panel) {
+			errs = append(errs, fmt.Errorf("BOTPANEL_SITES_DOMAINS: %q overlaps the panel's host; use a separate domain", d))
+		}
+		for _, o := range seen {
+			if o != "" && overlaps(d, o) {
+				errs = append(errs, fmt.Errorf("BOTPANEL_SITES_DOMAINS: %q overlaps %q; a sites domain cannot be, or be above or below, another", d, o))
+			}
+		}
+		seen = append(seen, d)
 	}
 	return errs
 }

@@ -8,10 +8,11 @@ type Site struct {
 	OwnerID         string
 	BotID           *string // set when this is the public page for a Discord bot
 	Name            string
-	Slug            string
-	SPA             bool   // unknown paths serve /index.html (client-side routing)
-	CleanURLs       bool   // /about serves about.html or about/index.html
-	Mode            string // page | files
+	Slug            string  // unique per base domain
+	DomainID        *string // base domain the slug lives under (nil only before start-up assigns one)
+	SPA             bool    // unknown paths serve /index.html (client-side routing)
+	CleanURLs       bool    // /about serves about.html or about/index.html
+	Mode            string  // page | files
 	PageTitle       string
 	PageDescription string
 	PageTheme       string // midnight | daylight | system
@@ -31,6 +32,7 @@ type Site struct {
 	// Filled by listing queries.
 	OwnerEmail    string
 	WorkspaceName string
+	BaseDomain    string // host of DomainID ("" when unassigned)
 	Domains       int
 	ReleaseBytes  int64 // size of the current release
 }
@@ -59,6 +61,42 @@ type SiteDomain struct {
 	LastError       *string
 	CreatedAtMS     int64
 }
+
+// SiteBaseDomain is a domain every site may live under: a site is served at
+// <slug>.<domain>. Domains listed in the configuration are trusted; any other
+// is served only once a DNS TXT record proves the administrator controls it.
+type SiteBaseDomain struct {
+	ID              string
+	Domain          string
+	Enabled         bool
+	Primary         bool   // the default for new sites
+	Label           string // display name
+	DNSTarget       string // optional host name or address shown in DNS instructions
+	FromConfig      bool   // listed in BOTPANEL_SITES_BASE_URL or BOTPANEL_SITES_DOMAINS
+	Token           string
+	VerifiedAtMS    *int64
+	LastCheckedAtMS *int64
+	LastError       *string
+	CreatedAtMS     int64
+	UpdatedAtMS     int64
+
+	Sites int // filled by listing queries
+}
+
+// Serving reports whether sites under the domain are served.
+func (d SiteBaseDomain) Serving() bool { return d.Enabled && d.VerifiedAtMS != nil }
+
+// SiteRouteTable is everything the sites listener needs to map a host name to
+// a site: slug routes per base domain, verified custom domains, and the base
+// domains being served.
+type SiteRouteTable struct {
+	BySlug   map[string]SiteRoute // key: SlugKey(domainID, slug)
+	ByDomain map[string]SiteRoute // verified custom domains
+	Bases    []SiteBaseDomain     // enabled and verified
+}
+
+// SlugKey is the BySlug key of a slug under a base domain.
+func SlugKey(domainID, slug string) string { return domainID + "\x00" + slug }
 
 // SiteRoute is what the sites listener needs to serve one host name.
 type SiteRoute struct {

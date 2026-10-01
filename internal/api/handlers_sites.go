@@ -18,6 +18,8 @@ type siteDTO struct {
 	BotID           *string `json:"bot_id"`
 	Name            string  `json:"name"`
 	Slug            string  `json:"slug"`
+	DomainID        *string `json:"domain_id"`
+	BaseDomain      string  `json:"base_domain"`
 	URL             string  `json:"url"`
 	SPA             bool    `json:"spa"`
 	CleanURLs       bool    `json:"clean_urls"`
@@ -42,7 +44,7 @@ type siteDTO struct {
 
 func (s *server) toSite(st domain.Site) siteDTO {
 	return siteDTO{ID: st.ID, WorkspaceID: st.WorkspaceID, WorkspaceName: st.WorkspaceName, OwnerID: st.OwnerID, OwnerEmail: st.OwnerEmail,
-		BotID: st.BotID, Name: st.Name, Slug: st.Slug, URL: s.sites.SiteURL(st.Slug), SPA: st.SPA, CleanURLs: st.CleanURLs,
+		BotID: st.BotID, Name: st.Name, Slug: st.Slug, DomainID: st.DomainID, BaseDomain: st.BaseDomain, URL: s.sites.URLOf(st), SPA: st.SPA, CleanURLs: st.CleanURLs,
 		Mode: st.Mode, PageTitle: st.PageTitle, PageDescription: st.PageDescription, PageTheme: st.PageTheme, PageAccent: st.PageAccent,
 		PageHTML: st.PageHTML, PageCSS: st.PageCSS, WidgetsPublic: st.WidgetsPublic, CurrentRelease: st.CurrentRelease,
 		ReleaseBytes: st.ReleaseBytes, Disabled: st.Disabled, Domains: st.Domains, RepoFullName: st.RepoFullName, RepoBranch: st.RepoBranch,
@@ -85,9 +87,9 @@ type domainDTO struct {
 	RecordTarget string `json:"record_target"`
 }
 
-func (s *server) toDomain(d domain.SiteDomain, slug string) domainDTO {
+func (s *server) toDomain(d domain.SiteDomain, st domain.Site) domainDTO {
 	name, value := service.VerificationRecord(d)
-	kind, target := s.sites.TrafficRecord(slug)
+	kind, target := s.sites.TrafficRecord(st.Slug, st.BaseDomain)
 	return domainDTO{d.Domain, s.sites.DomainURL(d.Domain), d.VerifiedAtMS != nil, d.VerifiedAtMS, d.LastCheckedAtMS, d.LastError,
 		name, value, kind, target}
 }
@@ -103,13 +105,30 @@ type releaseDTO struct {
 	CreatedAtMS int64   `json:"created_at_ms"`
 }
 
+// baseChoiceDTO is a base domain a site can be placed under.
+type baseChoiceDTO struct {
+	ID         string `json:"id"`
+	Domain     string `json:"domain"`
+	Label      string `json:"label"`
+	Primary    bool   `json:"primary"`
+	ExampleURL string `json:"example_url"`
+}
+
 // sitesInfo tells the interface whether hosting is on and how addresses look.
 func (s *server) sitesInfo(c fiber.Ctx) error {
 	if !s.sites.Enabled() {
 		return c.JSON(fiber.Map{"enabled": false})
 	}
-	return c.JSON(fiber.Map{"enabled": true, "domain": s.sites.SitesDomain(), "example_url": s.sites.SiteURL("example"),
-		"max_bytes": s.sites.MaxBytes, "max_domains": service.MaxDomainsPerSite})
+	bases, err := s.sites.ServingBaseDomains(c.Context())
+	if err != nil {
+		return err
+	}
+	choices := make([]baseChoiceDTO, len(bases))
+	for i, b := range bases {
+		choices[i] = baseChoiceDTO{b.ID, b.Domain, b.Label, b.Primary, s.sites.SiteURL("example", b.Domain)}
+	}
+	return c.JSON(fiber.Map{"enabled": true, "domain": s.sites.SitesDomain(), "example_url": s.sites.SiteURL("example", ""),
+		"domains": choices, "max_bytes": s.sites.MaxBytes, "max_domains": service.MaxDomainsPerSite})
 }
 
 func (s *server) listSites(c fiber.Ctx) error {
@@ -124,13 +143,15 @@ func (s *server) createSite(c fiber.Ctx) error {
 	var in struct {
 		Name        string `json:"name"`
 		Slug        string `json:"slug"`
+		DomainID    string `json:"domain_id"`
 		WorkspaceID string `json:"workspace_id"`
 		SPA         bool   `json:"spa"`
 	}
 	if err := decode(c, &in); err != nil {
 		return err
 	}
-	st, err := s.sites.Create(c.Context(), currentUser(c), service.CreateSiteInput{Name: in.Name, Slug: in.Slug, WorkspaceID: in.WorkspaceID, SPA: in.SPA})
+	st, err := s.sites.Create(c.Context(), currentUser(c), service.CreateSiteInput{Name: in.Name, Slug: in.Slug, DomainID: in.DomainID,
+		WorkspaceID: in.WorkspaceID, SPA: in.SPA})
 	if err != nil {
 		return err
 	}
@@ -144,13 +165,14 @@ func (s *server) createBotSite(c fiber.Ctx) error {
 		return err
 	}
 	var in struct {
-		Slug string `json:"slug"`
+		Slug     string `json:"slug"`
+		DomainID string `json:"domain_id"`
 	}
 	if err := decode(c, &in); err != nil {
 		return err
 	}
 	st, err := s.sites.Create(c.Context(), currentUser(c), service.CreateSiteInput{
-		Name: b.Name, Slug: in.Slug, WorkspaceID: b.WorkspaceID, BotID: b.ID, Mode: "page",
+		Name: b.Name, Slug: in.Slug, DomainID: in.DomainID, WorkspaceID: b.WorkspaceID, BotID: b.ID, Mode: "page",
 	})
 	if err != nil {
 		return err
@@ -181,7 +203,7 @@ func (s *server) getSite(c fiber.Ctx) error {
 func (s *server) siteDetailJSON(d service.SiteDetail) fiber.Map {
 	domains := make([]domainDTO, len(d.Domains))
 	for i, x := range d.Domains {
-		domains[i] = s.toDomain(x, d.Site.Slug)
+		domains[i] = s.toDomain(x, d.Site)
 	}
 	releases := make([]releaseDTO, len(d.Releases))
 	for i, r := range d.Releases {
@@ -195,6 +217,8 @@ func (s *server) siteDetailJSON(d service.SiteDetail) fiber.Map {
 func (s *server) patchSite(c fiber.Ctx) error {
 	var in struct {
 		Name            *string `json:"name"`
+		Slug            *string `json:"slug"`
+		DomainID        *string `json:"domain_id"`
 		SPA             *bool   `json:"spa"`
 		CleanURLs       *bool   `json:"clean_urls"`
 		WorkspaceID     *string `json:"workspace_id"`
@@ -216,7 +240,7 @@ func (s *server) patchSite(c fiber.Ctx) error {
 	if err := decode(c, &in); err != nil {
 		return err
 	}
-	up := service.UpdateSiteInput{Name: in.Name, SPA: in.SPA, CleanURLs: in.CleanURLs, WorkspaceID: in.WorkspaceID,
+	up := service.UpdateSiteInput{Name: in.Name, Slug: in.Slug, DomainID: in.DomainID, SPA: in.SPA, CleanURLs: in.CleanURLs, WorkspaceID: in.WorkspaceID,
 		Mode: in.Mode, PageTitle: in.PageTitle, PageDescription: in.PageDescription, PageTheme: in.PageTheme,
 		PageAccent: in.PageAccent, PageHTML: in.PageHTML, PageCSS: in.PageCSS, WidgetsPublic: in.WidgetsPublic}
 	if in.Repo != nil {
@@ -277,7 +301,7 @@ func (s *server) addSiteDomain(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	return c.Status(fiber.StatusCreated).JSON(s.toDomain(d, st.Site.Slug))
+	return c.Status(fiber.StatusCreated).JSON(s.toDomain(d, st.Site))
 }
 
 func (s *server) verifySiteDomain(c fiber.Ctx) error {
@@ -290,7 +314,7 @@ func (s *server) verifySiteDomain(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(s.toDomain(d, st.Site.Slug))
+	return c.JSON(s.toDomain(d, st.Site))
 }
 
 func (s *server) removeSiteDomain(c fiber.Ctx) error {
@@ -319,6 +343,116 @@ func (s *server) adminPatchSite(c fiber.Ctx) error {
 		return domain.Invalid("nothing to change")
 	}
 	if err := s.sites.SetDisabled(c.Context(), currentUser(c), strings.Clone(c.Params("sid")), *in.Disabled); err != nil {
+		return err
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// baseDomainDTO is a base domain as administrators see it, with the DNS
+// records that make it work.
+type baseDomainDTO struct {
+	ID              string  `json:"id"`
+	Domain          string  `json:"domain"`
+	Label           string  `json:"label"`
+	Enabled         bool    `json:"enabled"`
+	Primary         bool    `json:"primary"`
+	FromConfig      bool    `json:"from_config"`
+	Serving         bool    `json:"serving"`
+	Verified        bool    `json:"verified"`
+	VerifiedAtMS    *int64  `json:"verified_at_ms"`
+	LastCheckedAtMS *int64  `json:"last_checked_at_ms"`
+	LastError       *string `json:"last_error"`
+	DNSTarget       string  `json:"dns_target"`
+	Sites           int     `json:"sites"`
+	ExampleURL      string  `json:"example_url"`
+	TXTName         string  `json:"txt_name"`
+	TXTValue        string  `json:"txt_value"`
+	// The record that routes visitors for the domain and *.domain: CNAME to
+	// a host, or A/AAAA to an address ("" = this server's public address).
+	RecordType   string `json:"record_type"`
+	RecordTarget string `json:"record_target"`
+	CreatedAtMS  int64  `json:"created_at_ms"`
+}
+
+func (s *server) toBaseDomain(b domain.SiteBaseDomain) baseDomainDTO {
+	name, value := service.BaseDomainVerificationRecord(b)
+	kind, target := s.sites.BaseDomainRecord(b)
+	return baseDomainDTO{ID: b.ID, Domain: b.Domain, Label: b.Label, Enabled: b.Enabled, Primary: b.Primary, FromConfig: b.FromConfig,
+		Serving: b.Serving(), Verified: b.VerifiedAtMS != nil, VerifiedAtMS: b.VerifiedAtMS, LastCheckedAtMS: b.LastCheckedAtMS,
+		LastError: b.LastError, DNSTarget: b.DNSTarget, Sites: b.Sites, ExampleURL: s.sites.SiteURL("example", b.Domain),
+		TXTName: name, TXTValue: value, RecordType: kind, RecordTarget: target, CreatedAtMS: b.CreatedAtMS}
+}
+
+func (s *server) adminListBaseDomains(c fiber.Ctx) error {
+	list, err := s.sites.ListBaseDomains(c.Context(), currentUser(c))
+	if err != nil {
+		return err
+	}
+	out := make([]baseDomainDTO, len(list))
+	for i, b := range list {
+		out[i] = s.toBaseDomain(b)
+	}
+	return c.JSON(fiber.Map{"domains": out})
+}
+
+func (s *server) adminAddBaseDomain(c fiber.Ctx) error {
+	var in struct {
+		Domain    string `json:"domain"`
+		Label     string `json:"label"`
+		DNSTarget string `json:"dns_target"`
+	}
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	b, err := s.sites.AddBaseDomain(c.Context(), currentUser(c), service.BaseDomainInput{Domain: in.Domain, Label: in.Label, DNSTarget: in.DNSTarget})
+	if err != nil {
+		return err
+	}
+	return c.Status(fiber.StatusCreated).JSON(s.toBaseDomain(b))
+}
+
+func (s *server) adminVerifyBaseDomain(c fiber.Ctx) error {
+	b, err := s.sites.VerifyBaseDomain(c.Context(), currentUser(c), strings.Clone(c.Params("domain")))
+	if err != nil {
+		return err
+	}
+	return c.JSON(s.toBaseDomain(b))
+}
+
+func (s *server) adminPatchBaseDomain(c fiber.Ctx) error {
+	var in struct {
+		Enabled   *bool   `json:"enabled"`
+		Primary   *bool   `json:"primary"`
+		Label     *string `json:"label"`
+		DNSTarget *string `json:"dns_target"`
+	}
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	b, err := s.sites.UpdateBaseDomain(c.Context(), currentUser(c), strings.Clone(c.Params("domain")),
+		service.BaseDomainUpdate{Enabled: in.Enabled, Primary: in.Primary, Label: in.Label, DNSTarget: in.DNSTarget})
+	if err != nil {
+		return err
+	}
+	return c.JSON(s.toBaseDomain(b))
+}
+
+func (s *server) adminMoveBaseDomainSites(c fiber.Ctx) error {
+	var in struct {
+		To string `json:"to"`
+	}
+	if err := decode(c, &in); err != nil {
+		return err
+	}
+	n, err := s.sites.MoveBaseDomainSites(c.Context(), currentUser(c), strings.Clone(c.Params("domain")), in.To)
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"moved": n})
+}
+
+func (s *server) adminDeleteBaseDomain(c fiber.Ctx) error {
+	if err := s.sites.DeleteBaseDomain(c.Context(), currentUser(c), strings.Clone(c.Params("domain"))); err != nil {
 		return err
 	}
 	return c.SendStatus(fiber.StatusNoContent)

@@ -17,7 +17,7 @@
 	let error = $state('');
 	let q = $state('');
 	let open = $state(false);
-	let form = $state({ name: '', slug: '', workspace_id: '', spa: false });
+	let form = $state({ name: '', slug: '', domain_id: '', workspace_id: '', spa: false });
 	let slugTouched = $state(false);
 	let formError = $state('');
 	let busy = $state(false);
@@ -42,11 +42,13 @@
 	const scope = $derived(currentWorkspace());
 	const multi = $derived(workspaces.list.length > 1 && workspaces.selected === 'all');
 	const suggest = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
-	const preview = $derived(info?.example_url?.replace('://example.', `://${(slugTouched ? form.slug : suggest(form.name)) || 'your-site'}.`) ?? '');
+	const bases = $derived(info?.domains ?? []);
+	const exampleURL = $derived(bases.find((b) => b.id === form.domain_id)?.example_url ?? info?.example_url ?? '');
+	const preview = $derived(exampleURL.replace('://example.', `://${(slugTouched ? form.slug : suggest(form.name)) || 'your-site'}.`));
 
 	function start() {
 		const ws = workspaces.selected !== 'all' && !workspaces.list.find((w) => w.id === workspaces.selected)?.personal ? workspaces.selected : '';
-		form = { name: '', slug: '', workspace_id: ws, spa: false };
+		form = { name: '', slug: '', domain_id: bases.find((b) => b.primary)?.id ?? '', workspace_id: ws, spa: false };
 		slugTouched = false;
 		formError = '';
 		open = true;
@@ -146,8 +148,13 @@
 		<label class="block"><span class="label">Name</span><input class="field" required maxlength="64" bind:value={form.name} placeholder="Bot dashboard" /></label>
 		<label class="block">
 			<span class="label">Address</span>
-			<input class="field font-mono" maxlength="40" value={slugTouched ? form.slug : suggest(form.name)} oninput={(e) => { slugTouched = true; form.slug = e.currentTarget.value.toLowerCase(); }} placeholder="bot-dashboard" />
-			<span class="help">Served at <code class="text-ink">{preview}</code>. Lower-case letters, digits and hyphens. You can add your own domain afterwards.</span>
+			<div class="flex items-stretch">
+				<input class="field min-w-0 font-mono {bases.length > 1 ? 'rounded-r-none' : ''}" maxlength="40" value={slugTouched ? form.slug : suggest(form.name)} oninput={(e) => { slugTouched = true; form.slug = e.currentTarget.value.toLowerCase(); }} placeholder="bot-dashboard" />
+				{#if bases.length > 1}
+					<select class="field w-auto max-w-[55%] rounded-l-none border-l-0 font-mono" bind:value={form.domain_id} aria-label="Sites domain">{#each bases as b (b.id)}<option value={b.id}>.{b.domain}{b.label ? ` (${b.label})` : ''}</option>{/each}</select>
+				{/if}
+			</div>
+			<span class="help">Served at <code class="text-ink">{preview}</code>. Lower-case letters, digits and hyphens. You can change it, or add your own domain, afterwards.</span>
 		</label>
 		{#if creatable().length > 1}
 			<label class="block"><span class="label">Workspace</span>

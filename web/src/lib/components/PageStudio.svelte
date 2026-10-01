@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, ApiError, fmtBytes } from '$lib/api/client';
-	import type { Site, SiteDomain, SiteRelease, WorkspaceRole } from '$lib/api/types';
+	import type { Site, SiteBaseChoice, SiteDomain, SiteRelease, SitesInfo, WorkspaceRole } from '$lib/api/types';
 	import { session } from '$lib/session.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -34,6 +34,8 @@
 	let saving = $state(false);
 	let publishing = $state(false);
 	let slug = $state('');
+	let bases = $state<SiteBaseChoice[]>([]);
+	let domainId = $state('');
 	let previewKey = $state(0);
 	let form = $state({
 		page_title: '',
@@ -75,8 +77,17 @@
 			sync();
 		} catch (e) {
 			if (!(e instanceof ApiError && e.status === 404)) error = msg(e);
+			else loadBases();
 		} finally {
 			loading = false;
+		}
+	}
+	async function loadBases() {
+		try {
+			bases = (await api<SitesInfo>('GET', '/sites-info')).domains ?? [];
+			domainId = bases.find((b) => b.primary)?.id ?? bases[0]?.id ?? '';
+		} catch {
+			bases = [];
 		}
 	}
 	onMount(load);
@@ -85,7 +96,7 @@
 		e.preventDefault();
 		creating = true;
 		try {
-			d = await api<Detail>('POST', `/bots/${botId}/site`, { slug: slug || suggestedSlug });
+			d = await api<Detail>('POST', `/bots/${botId}/site`, { slug: slug || suggestedSlug, domain_id: domainId });
 			sync();
 			previewKey++;
 			toast('Public page created', 'success');
@@ -159,7 +170,7 @@
 				<form class="rounded-tile border border-white/12 bg-white/6 p-5 backdrop-blur" onsubmit={createPage}>
 					<h3 class="text-title font-semibold">Choose the address</h3>
 					<p class="mt-1 text-small text-white/55">You can add a custom domain after creation.</p>
-					<label class="mt-5 block"><span class="label !text-white/65">Site address</span><div class="flex items-stretch"><input class="field rounded-r-none border-white/20 bg-black/20 text-white" bind:value={slug} placeholder={suggestedSlug} /><span class="flex items-center rounded-r-control border border-l-0 border-white/20 px-3 text-small text-white/45">.sites</span></div></label>
+					<label class="mt-5 block"><span class="label !text-white/65">Site address</span><div class="flex items-stretch"><input class="field rounded-r-none border-white/20 bg-black/20 text-white" bind:value={slug} placeholder={suggestedSlug} />{#if bases.length > 1}<select class="field w-auto max-w-[55%] rounded-l-none border-l-0 border-white/20 bg-black/20 text-small text-white/80" bind:value={domainId} aria-label="Sites domain">{#each bases as b (b.id)}<option value={b.id}>.{b.domain}</option>{/each}</select>{:else}<span class="flex items-center rounded-r-control border border-l-0 border-white/20 px-3 text-small text-white/45">.{bases[0]?.domain ?? 'sites'}</span>{/if}</div></label>
 					<button class="btn btn-primary mt-4 w-full" disabled={creating}>{creating ? 'Creating…' : 'Create public page'}</button>
 				</form>
 			{:else}
@@ -174,7 +185,7 @@
 			<div class="flex flex-wrap items-center gap-2"><h2 class="text-section">Public page</h2><span class="pill" data-tone={d.site.disabled ? 'fail' : live ? 'run' : 'warn'}>{d.site.disabled ? 'Suspended' : live ? 'Live' : 'Draft'}</span></div>
 			<a class="mt-0.5 inline-flex max-w-full items-center gap-1 font-mono text-small text-action hover:underline" href={d.site.url} target="_blank" rel="noopener"><span class="truncate">{d.site.url}</span><Icon name="external" size={12} /></a>
 		</div>
-		<a class="btn btn-sm" href={`/sites/${d.site.id}`}><Icon name="sliders" size={14} />Domains & releases</a>
+		<a class="btn btn-sm" href={`/sites/${d.site.id}`}><Icon name="sliders" size={14} />Address, domains & releases</a>
 		<a class="btn btn-sm" href={d.site.url} target="_blank" rel="noopener"><Icon name="external" size={14} />Open page</a>
 	</div>
 

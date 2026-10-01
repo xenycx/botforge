@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, ApiError, fmtBytes, upload } from '$lib/api/client';
-	import { roleRank, type Connection, type GitHubRepo, type Site, type SiteDomain, type SiteRelease, type WorkspaceRole } from '$lib/api/types';
+	import { roleRank, type Connection, type GitHubRepo, type Site, type SiteBaseChoice, type SiteDomain, type SiteRelease, type SitesInfo, type WorkspaceRole } from '$lib/api/types';
 	import { fmtAgo, fmtWhen } from '$lib/args';
 	import { session } from '$lib/session.svelte';
 	import { confirmDialog } from '$lib/ui/dialogs.svelte';
@@ -32,7 +32,8 @@
 	let repos = $state<GitHubRepo[]>([]);
 	let repoForm = $state({ full_name: '', branch: '', root_dir: '' });
 	let repoOpen = $state(false);
-	let settings = $state({ name: '', spa: false, clean_urls: true, workspace_id: '' });
+	let settings = $state({ name: '', slug: '', domain_id: '', spa: false, clean_urls: true, workspace_id: '' });
+	let bases = $state<SiteBaseChoice[]>([]);
 	const msg = (e: unknown) => (e instanceof ApiError ? e.message : 'The request failed.');
 
 	async function load() {
@@ -45,12 +46,15 @@
 	}
 	function syncForms() {
 		if (!d) return;
-		settings = { name: d.site.name, spa: d.site.spa, clean_urls: d.site.clean_urls, workspace_id: d.site.workspace_id };
+		settings = { name: d.site.name, slug: d.site.slug, domain_id: d.site.domain_id ?? '', spa: d.site.spa, clean_urls: d.site.clean_urls, workspace_id: d.site.workspace_id };
 		repoForm = { full_name: d.site.repo_full_name ?? '', branch: d.site.repo_branch ?? '', root_dir: d.site.repo_root };
 	}
 	onMount(() => {
 		load().then(syncForms);
 		loadWorkspaces();
+		api<SitesInfo>('GET', '/sites-info')
+			.then((r) => (bases = r.domains ?? []))
+			.catch(() => {});
 		if (session.features.deploy) {
 			api<{ connections: Connection[] }>('GET', '/me/connections')
 				.then(async (r) => {
@@ -68,6 +72,19 @@
 	const canEdit = $derived(roleRank[d?.role ?? ''] >= roleRank.developer);
 	const canAdmin = $derived(roleRank[d?.role ?? ''] >= roleRank.admin);
 	const live = $derived(!!d?.site.current_release && !d.site.disabled);
+	// Domains the site can move to, plus its current one even when that no
+	// longer takes new sites.
+	const addressChoices = $derived.by(() => {
+		const list = bases.map((b) => ({ id: b.id, domain: b.domain }));
+		if (d?.site.domain_id && !list.some((b) => b.id === d!.site.domain_id)) list.unshift({ id: d.site.domain_id, domain: d.site.base_domain });
+		return list;
+	});
+	const addressChanged = $derived(!!d && (settings.slug.trim() !== d.site.slug || (!!settings.domain_id && settings.domain_id !== (d.site.domain_id ?? ''))));
+	const newAddress = $derived.by(() => {
+		if (!d) return '';
+		const base = addressChoices.find((b) => b.id === settings.domain_id)?.domain ?? d.site.base_domain;
+		return d.site.url.replace(/^(https?:\/\/)[^:/]+/, `$1${settings.slug.trim() || d.site.slug}.${base}`);
+	});
 
 	async function send(file: File) {
 		if (!file.name.toLowerCase().endsWith('.zip')) return toast('Choose a .zip archive of the site’s files.', 'fail');
@@ -173,6 +190,16 @@
 		e.preventDefault();
 		const body: Record<string, unknown> = { name: settings.name, spa: settings.spa, clean_urls: settings.clean_urls };
 		if (canAdmin && settings.workspace_id !== d?.site.workspace_id) body.workspace_id = settings.workspace_id;
+		if (addressChanged && d) {
+			const ok = await confirmDialog({
+				title: 'Change the site address?',
+				body: `The site moves to ${newAddress} immediately. ${d.site.url} stops working and another site can take it. Verified custom domains keep working.`,
+				confirmLabel: 'Change address'
+			});
+			if (!ok) return;
+			body.slug = settings.slug.trim().toLowerCase();
+			if (settings.domain_id) body.domain_id = settings.domain_id;
+		}
 		try {
 			d = await api<Detail>('PATCH', `/sites/${id}`, body);
 			syncForms();
@@ -354,6 +381,18 @@
 					<h2 id="set-h" class="text-title font-semibold">Settings</h2>
 					<form class="mt-4 grid gap-4" onsubmit={saveSettings}>
 						<label class="block"><span class="label">Name</span><input class="field" required maxlength="64" bind:value={settings.name} /></label>
+						<label class="block">
+							<span class="label">Address</span>
+							<div class="flex items-stretch">
+								<input class="field min-w-0 rounded-r-none font-mono" required minlength="3" maxlength="40" bind:value={settings.slug} oninput={(e) => (settings.slug = e.currentTarget.value.toLowerCase())} aria-describedby="address-help" />
+								{#if addressChoices.length > 1}
+									<select class="field w-auto max-w-[55%] rounded-l-none border-l-0 font-mono" bind:value={settings.domain_id} aria-label="Sites domain">{#each addressChoices as b (b.id)}<option value={b.id}>.{b.domain}</option>{/each}</select>
+								{:else}
+									<span class="flex items-center truncate rounded-r-control border border-l-0 border-rule px-3 font-mono text-small text-muted">.{d.site.base_domain}</span>
+								{/if}
+							</div>
+							<span id="address-help" class="help">{#if addressChanged}Moves to <code class="text-ink">{newAddress}</code>; the current address stops working.{:else}Lower-case letters, digits and hyphens. Unique on each sites domain.{/if}</span>
+						</label>
 						<label class="flex items-start gap-2.5"><input type="checkbox" class="mt-0.5" bind:checked={settings.spa} /><span>Single-page application<span class="help mt-0">Unknown paths serve <code>index.html</code>.</span></span></label>
 						<label class="flex items-start gap-2.5"><input type="checkbox" class="mt-0.5" bind:checked={settings.clean_urls} /><span>Clean URLs<span class="help mt-0"><code>/about</code> serves <code>about.html</code>.</span></span></label>
 						{#if canAdmin && creatable().length > 1}

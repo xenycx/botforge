@@ -460,6 +460,12 @@ func (s *server) routes(v1 fiber.Router) {
 		authed.Delete("/sites/:sid/domains/:domain", s.removeSiteDomain)
 		authed.Get("/admin/sites", s.requireAdmin, s.adminListSites)
 		authed.Patch("/admin/sites/:sid", s.requireAdmin, s.adminPatchSite)
+		authed.Get("/admin/site-base-domains", s.requireAdmin, s.adminListBaseDomains)
+		authed.Post("/admin/site-base-domains", s.requireAdmin, s.adminAddBaseDomain)
+		authed.Post("/admin/site-base-domains/:domain/verify", s.requireAdmin, s.adminVerifyBaseDomain)
+		authed.Post("/admin/site-base-domains/:domain/move-sites", s.requireAdmin, s.adminMoveBaseDomainSites)
+		authed.Patch("/admin/site-base-domains/:domain", s.requireAdmin, s.adminPatchBaseDomain)
+		authed.Delete("/admin/site-base-domains/:domain", s.requireAdmin, s.adminDeleteBaseDomain)
 	}
 
 	admin := authed.Group("/users", s.requireAdmin)

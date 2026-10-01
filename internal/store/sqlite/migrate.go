@@ -84,23 +84,68 @@ func (db *DB) Migrate(ctx context.Context, fsys fs.FS) error {
 		if err != nil {
 			return err
 		}
-		tx, err := db.BeginTx(ctx, nil)
+		if err := db.apply(ctx, m.version, m.name, string(body)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// noForeignKeys marks a migration that rebuilds a table other tables
+// reference. With foreign keys on, dropping the old table would cascade into
+// every referencing row, so the migration runs on one connection with
+// foreign keys off (SQLite's documented table-rebuild procedure) and must
+// leave no dangling reference behind.
+const noForeignKeys = "-- botpanel:foreign-keys-off"
+
+func (db *DB) apply(ctx context.Context, version int, name, body string) (err error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	rebuild := strings.HasPrefix(body, noForeignKeys)
+	if rebuild {
+		// PRAGMA foreign_keys is a no-op inside a transaction: set it first,
+		// and restore it before the connection returns to the pool.
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer func() {
+			var on int
+			if _, e := conn.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`); e != nil && err == nil {
+				err = e
+			} else if e := conn.QueryRowContext(context.Background(), `PRAGMA foreign_keys`).Scan(&on); (e != nil || on != 1) && err == nil {
+				err = fmt.Errorf("re-enable foreign keys after %s", name)
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, body); err != nil {
+		return fmt.Errorf("apply %s: %w", name, err)
+	}
+	if rebuild {
+		rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("apply %s: %w", m.name, err)
+		broken := rows.Next()
+		rows.Close()
+		if broken {
+			return fmt.Errorf("apply %s: the rebuilt tables leave a broken foreign key", name)
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO schema_migrations (version, name, applied_at_ms) VALUES (?, ?, ?)`,
-			m.version, m.name, time.Now().UnixMilli()); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit %s: %w", m.name, err)
-		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO schema_migrations (version, name, applied_at_ms) VALUES (?, ?, ?)`,
+		version, name, time.Now().UnixMilli()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit %s: %w", name, err)
 	}
 	return nil
 }

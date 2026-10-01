@@ -154,6 +154,8 @@ var Vars = []VarSpec{
 		Description: "Separate listener that only serves hosted sites, never the panel. Empty turns site hosting off. It must differ from the panel address."},
 	{Name: "BOTPANEL_SITES_BASE_URL", Group: GroupSites, Kind: KindURL, Example: "https://sites.example.com",
 		Description: "Public origin sites are served under (a site named docs is served at docs.<host>). Use a different domain than the panel."},
+	{Name: "BOTPANEL_SITES_DOMAINS", Group: GroupSites, Kind: KindText, Example: "pages.example.net,example-sites.org",
+		Description: "Further domains sites can live under, comma-separated, trusted like the base URL's host. Administrators can also add domains in Administration → Sites and domains, verified by DNS."},
 	{Name: "BOTPANEL_SITES_DIR", Group: GroupSites, Kind: KindPath, Default: "/var/lib/botpanel/sites",
 		Description: "Directory holding site releases."},
 	{Name: "BOTPANEL_SITE_MAX_BYTES", Group: GroupSites, Kind: KindBytes, Default: "100 MiB",

@@ -67,6 +67,17 @@ items state exactly what remains.
   publication, and editable private site drafts that publish as immutable
   releases. Enforcement: author code runs only on the separate Sites origin;
   public page queries omit private analytics and operator/account data.
+- [x] Editable site addresses and several sites domains: a slug is unique per
+  sites domain; developers change a site's slug and sites domain in its
+  settings; administrators add sites domains at runtime (served only after a
+  `_botforge-domain` TXT record is verified; environment-file domains are
+  trusted), choose the primary, turn domains off, move every site between
+  domains (all or nothing) and remove unused ones. Enforcement: application
+  level, in the sites listener's host routing; the panel's host and its
+  parents/subdomains, overlapping sites domains, and custom domains under a
+  sites domain are refused. Routing and certificates per sites domain are
+  **not** managed by BotForge: the reverse proxy needs a catch-all route and
+  a certificate for each domain (`docs/sites.md`).
 - [x] Custom domains for sites with DNS TXT ownership verification and
   six-hourly re-checks. Enforcement: the sites listener serves a custom domain
   only after verification (application level). TLS is **not** terminated by
@@ -127,6 +138,7 @@ Migrations added since 0.2.0 (the schema-version assertion in
 | `0032_host_telemetry.sql` | `node_telemetry` gains `load1`, swap, network and disk throughput columns (existing rows read as zero) |
 | `0033_mail.sql` | `password_resets` (hashed one-use reset links, one per account) and `users.email_alerts` (alert-email switch, default on) |
 | `0034_mail_news.sql` | `users.email_news` (optional news-email switch, default on) |
+| `0035_site_base_domains.sql` | `site_base_domains`; rebuilds `sites` with `domain_id` and a per-domain unique address (`domain_id`, `slug`) instead of a panel-wide unique slug. Runs with foreign keys off (new `-- botpanel:foreign-keys-off` migration marker, checked with `PRAGMA foreign_key_check`) so releases, custom domains and assistant chats are kept; start-up assigns existing sites to the primary domain |
 | `0030_ai_global_chat.sql` | Rebuilds `ai_conversations` so a chat may have no target; `ai_runs.bot_id`/`site_id`, `ai_messages.context_json` (the conversation subtree is stashed and restored, rows preserved) |
 
 Known gaps in this work:
@@ -135,6 +147,9 @@ Known gaps in this work:
   site publication; those stay manual.
 
 - [ ] Site release files are not included in `botpanel backup`/`restore`.
+- [ ] Sites domains: the panel does not write reverse-proxy routes or install
+  certificates (no Cloudflare Origin CA or ACME integration); a site lives
+  under one sites domain and is not aliased under the others.
 - [ ] Sites have no automation-API upload route, redirects/headers files,
   password protection, per-site analytics, bandwidth limits, or server-side
   builds; uploads are not malware-scanned.
