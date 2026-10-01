@@ -5,6 +5,7 @@
 	import { confirmDialog } from '$lib/ui/dialogs.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 	import ChangeList from '$lib/components/ChangeList.svelte';
 	import type { AuditEvent, AuditPage } from '$lib/audit';
 	import { confirmWithOption } from '$lib/ui/dialogs.svelte';
@@ -127,47 +128,46 @@
 	}
 </script>
 
-<p class="mb-4 max-w-prose text-muted">Give other people with an account on this panel access to this bot. The owner and administrators always have full access. Anyone who can change files or environment variables can make the bot reveal its secrets, so share those only with people you trust.</p>
-
-<ul class="divide-y divide-rule-soft border-y border-rule-soft">
-	{#each users as u (u.user_id)}
-		<li class="grid gap-2 bg-panel px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-			<div class="min-w-0">
-				<div class="font-medium">{u.email}</div>
-				<div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-					{#each options as o (o.bit)}
-						<label class="flex items-center gap-1.5" title={o.hint}>
-							<input type="checkbox" checked={(u.permissions & o.bit) !== 0} onchange={() => save(u.email, toggle(u.permissions, o.bit))} />{o.label}
-						</label>
-					{/each}
+<SettingsSection title="People with access" description="The owner and administrators always have full access. Anyone who can change files or environment variables can make the bot reveal its secrets, so share those only with people you trust.">
+	<ul class="list-card">
+		{#each users as u (u.user_id)}
+			<li class="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+				<div class="min-w-0">
+					<div class="font-medium break-all">{u.email}</div>
+					<div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+						{#each options as o (o.bit)}
+							<label class="flex items-center gap-1.5" title={o.hint}>
+								<input type="checkbox" checked={(u.permissions & o.bit) !== 0} onchange={() => save(u.email, toggle(u.permissions, o.bit))} />{o.label}
+							</label>
+						{/each}
+					</div>
 				</div>
-			</div>
-			<button class="btn btn-sm btn-danger" onclick={() => remove(u)}>Remove access</button>
-		</li>
-	{:else}
-		<li class="py-4 text-muted">This bot is not shared with anyone.</li>
-	{/each}
-</ul>
-
-<form class="mt-8 max-w-2xl" onsubmit={add}>
-	<h3 class="text-title font-semibold">Share with someone</h3>
-	<label class="mt-2 block"><span class="label">Email of a panel user</span><input class="field" type="email" required bind:value={email} placeholder="friend@example.com" /></label>
-	<div class="mt-3 grid gap-3 sm:grid-cols-2">
-		{#each options as o (o.bit)}
-			<label class="flex items-start gap-2"><input type="checkbox" class="mt-0.5" checked={(perms & o.bit) !== 0} onchange={() => (perms = toggle(perms, o.bit))} /><span>{o.label}<span class="help">{o.hint}</span></span></label>
+				<button class="btn btn-sm btn-danger" onclick={() => remove(u)}>Remove access</button>
+			</li>
+		{:else}
+			<li class="px-4 py-4 text-muted">This bot is not shared with anyone yet.</li>
 		{/each}
-	</div>
-	{#if error}<Notice tone="fail" class="mt-3" live>{error}</Notice>{/if}
-	<button class="btn btn-primary mt-4" disabled={perms === 0}>Share bot</button>
-</form>
+	</ul>
+</SettingsSection>
 
-<section class="mt-12 max-w-2xl" aria-labelledby="inv-h">
-	<h3 id="inv-h" class="text-title font-semibold">Invite with a link</h3>
-	<p class="mt-1 text-muted">For someone who has an account here but whose email you do not know. The link works once, for the first person who opens it and accepts.</p>
-	<form class="mt-3 grid gap-3" onsubmit={createInvite}>
-		<div class="grid gap-3 sm:grid-cols-2">
+<SettingsSection title="Share with someone" description="Give an existing panel account access by the email they sign in with. Tick only what they need.">
+	<form onsubmit={add}>
+		<label class="block"><span class="label">Email of a panel user</span><input class="field" type="email" required bind:value={email} placeholder="friend@example.com" /></label>
+		<div class="mt-3 grid gap-3 sm:grid-cols-2">
 			{#each options as o (o.bit)}
-				<label class="flex items-start gap-2"><input type="checkbox" class="mt-0.5" checked={(invPerms & o.bit) !== 0} onchange={() => (invPerms = toggle(invPerms, o.bit))} /><span>{o.label}</span></label>
+				<label class="flex items-start gap-2.5 rounded-tile border border-rule-soft bg-panel px-3 py-2.5 has-[:checked]:border-action/40"><input type="checkbox" class="mt-0.5" checked={(perms & o.bit) !== 0} onchange={() => (perms = toggle(perms, o.bit))} /><span>{o.label}<span class="help mt-0">{o.hint}</span></span></label>
+			{/each}
+		</div>
+		{#if error}<Notice tone="fail" class="mt-3" live>{error}</Notice>{/if}
+		<button class="btn btn-primary mt-4" disabled={perms === 0}>Share bot</button>
+	</form>
+</SettingsSection>
+
+<SettingsSection title="Invite with a link" description="For someone who has an account here but whose email you do not know. The link works once, for the first person who opens it and accepts.">
+	<form class="grid gap-3" onsubmit={createInvite}>
+		<div class="flex flex-wrap gap-x-5 gap-y-2">
+			{#each options as o (o.bit)}
+				<label class="flex items-center gap-2"><input type="checkbox" checked={(invPerms & o.bit) !== 0} onchange={() => (invPerms = toggle(invPerms, o.bit))} /><span>{o.label}</span></label>
 			{/each}
 		</div>
 		<div class="flex flex-wrap items-end gap-2">
@@ -184,9 +184,9 @@
 		</Notice>
 	{/if}
 	{#if invites.length}
-		<ul class="mt-3 divide-y divide-rule-soft border-y border-rule-soft">
+		<ul class="mt-3 list-card">
 			{#each invites as v (v.id)}
-				<li class="flex flex-wrap items-center gap-3 py-2">
+				<li class="flex flex-wrap items-center gap-3 px-3 py-2">
 					<div class="min-w-0 flex-1">
 						<p>{permNames(v.permissions)}</p>
 						<p class="text-small text-muted">Created by {v.created_by} · expires {new Date(v.expires_at_ms).toLocaleString()}</p>
@@ -196,21 +196,16 @@
 			{/each}
 		</ul>
 	{/if}
-</section>
+</SettingsSection>
 
-<section class="mt-12 max-w-2xl" aria-labelledby="hist-h">
-	<div class="flex items-baseline justify-between gap-2">
-		<h3 id="hist-h" class="text-title font-semibold">Recent changes</h3>
-		<a class="link text-small" href="/activity?bot={botId}&view=changes">Full history</a>
-	</div>
-	{#if changes === null}<p class="mt-2 text-muted">Loading…</p>{:else if changes.length}<div class="mt-2"><ChangeList events={changes} /></div>{:else}<p class="mt-2 text-muted">Nothing recorded yet.</p>{/if}
-</section>
+<SettingsSection title="Recent changes" description="Who changed files, variables, access and settings of this bot. Values are never recorded.">
+	{#snippet aside()}<p class="mt-2 text-small"><a class="link" href="/activity?bot={botId}&view=changes">Full history</a></p>{/snippet}
+	{#if changes === null}<p class="text-muted">Loading…</p>{:else if changes.length}<ChangeList events={changes} />{:else}<p class="text-muted">Nothing recorded yet.</p>{/if}
+</SettingsSection>
 
-<section class="mt-12 max-w-2xl border-t border-rule-soft pt-5" aria-labelledby="tr-h">
-	<h3 id="tr-h" class="text-title font-semibold">Transfer ownership</h3>
-	<p class="mt-1 text-muted">Give this bot to another account on the panel, for example when someone leaves the team.</p>
-	<form class="mt-3 flex flex-wrap items-end gap-2" onsubmit={transfer}>
+<SettingsSection title="Transfer ownership" description="Give this bot to another account on the panel, for example when someone leaves the team. It moves into their personal workspace.">
+	<form class="flex flex-wrap items-end gap-2 rounded-tile border border-fail/30 bg-fail/5 px-4 py-3" onsubmit={transfer}>
 		<label class="block min-w-0 flex-1 basis-64"><span class="label">Email of the new owner</span><input class="field" type="email" required bind:value={transferTo} /></label>
 		<button class="btn btn-danger">Transfer…</button>
 	</form>
-</section>
+</SettingsSection>

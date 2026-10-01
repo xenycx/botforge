@@ -164,13 +164,13 @@
 </script>
 
 <!-- Protection first: when the last good copy was made and when the next one is due. -->
-<section aria-label="Backup health" class="grid gap-x-8 gap-y-3 border-y border-rule-soft py-3 sm:grid-cols-3">
-	<div>
+<section aria-label="Backup health" class="grid gap-3 sm:grid-cols-3">
+	<div class="stat">
 		<p class="text-small text-muted">Last successful backup</p>
 		<p class="font-medium">{health?.last_success_ms ? fmtAgo(health.last_success_ms, now) : 'None yet'}</p>
 		{#if health?.last_success_ms}<p class="text-small text-muted">{fmtWhen(health.last_success_ms)}</p>{/if}
 	</div>
-	<div>
+	<div class="stat">
 		<p class="text-small text-muted">Schedule</p>
 		{#if !health}
 			<p class="text-muted">…</p>
@@ -184,7 +184,7 @@
 			<p class="text-small text-muted">{health.next_due_ms <= now ? 'Next one is due now.' : `Next at ${fmtWhen(health.next_due_ms)}`}</p>
 		{/if}
 	</div>
-	<div>
+	<div class="stat">
 		<p class="text-small text-muted">Stored</p>
 		<p class="font-medium">{health ? fmtBytes(health.total_bytes) : '…'}</p>
 		{#if health}<p class="text-small text-muted">{health.count} of {health.limit} backups</p>{/if}
@@ -218,9 +218,9 @@
 	{#if backups === null && !error}
 		<Skeleton rows={3} label="Loading backups" />
 	{:else if backups}
-		<ul class="border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+		<ul class="list-card">
 			{#each shown as b (b.id)}
-				<li class="spine flex flex-wrap items-center gap-x-4 gap-y-2 py-3 pr-2 pl-5" data-tone={b.status === 'failed' ? 'fail' : b.status === 'creating' ? 'warn' : b.verify_error ? 'fail' : 'idle'} data-busy={b.status === 'creating'}>
+				<li class="spine flex flex-wrap items-center gap-x-4 gap-y-2 py-3 pr-3 pl-5" data-tone={b.status === 'failed' ? 'fail' : b.status === 'creating' ? 'warn' : b.verify_error ? 'fail' : 'idle'} data-busy={b.status === 'creating'}>
 					<div class="min-w-0 flex-1 basis-64">
 						<p class="font-medium">{b.label ?? fmtWhen(b.created_at_ms)}</p>
 						<p class="text-small text-muted">

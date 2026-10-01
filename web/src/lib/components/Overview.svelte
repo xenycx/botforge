@@ -125,7 +125,7 @@
 		<!-- What is happening and what to do next. A failure outranks everything else. -->
 		<section aria-labelledby="ov-state">
 			<h3 id="ov-state" class="text-title font-semibold">Status</h3>
-			<div class="mt-2 border border-rule-soft bg-panel p-4">
+			<div class="mt-2 rounded-tile border border-rule-soft bg-panel p-4">
 				<p class="text-section font-semibold {d.tone === 'fail' ? 'text-fail' : ''}">{d.label}</p>
 				{#if d.detail}<p class="mt-1 max-w-prose">{d.detail}</p>{/if}
 				{#if bot.phase === 'running' && bot.last_started_at_ms}
@@ -162,9 +162,9 @@
 			<section aria-labelledby="ov-setup">
 				<h3 id="ov-setup" class="text-title font-semibold">Setup</h3>
 				<p class="text-muted">Shown until the bot runs for the first time.</p>
-				<ol class="mt-3 border-y border-rule-soft">
+				<ol class="mt-3 list-card">
 					{#each steps as s, i (s.label)}
-						<li class="flex items-start gap-3 border-b border-rule-soft py-3 last:border-b-0">
+						<li class="flex items-start gap-3 px-4 py-3">
 							<span
 								class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-pill text-small font-semibold {s.done === true ? 'bg-run text-white' : s.done === false ? 'border-2 border-warn text-warn' : 'border border-rule text-muted'}"
 								aria-hidden="true">{#if s.done === true}<Icon name="check" size={13} />{:else}{i + 1}{/if}</span

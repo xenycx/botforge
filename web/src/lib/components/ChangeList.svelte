@@ -7,7 +7,7 @@
 	let { events, showBot = false, now = Date.now() }: { events: AuditEvent[]; showBot?: boolean; now?: number } = $props();
 </script>
 
-<ul class="border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+<ul class="list-card">
 	{#each events as e (e.id)}
 		<li class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-3 py-2.5">
 			<p class="min-w-0 flex-1 basis-72">

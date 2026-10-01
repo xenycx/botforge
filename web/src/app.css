@@ -483,6 +483,25 @@
 		border-radius: var(--radius-card);
 		background: var(--color-panel);
 	}
+	/* A rounded list: rows separated by hairlines inside one card. Rows keep
+	   their own padding; a .spine row gets its rail clipped by the corners. */
+	.list-card {
+		overflow: hidden;
+		border: 1px solid var(--color-rule-soft);
+		border-radius: var(--radius-tile);
+		background: var(--color-panel);
+	}
+	.list-card > * + * {
+		border-top: 1px solid var(--color-rule-soft);
+	}
+	/* A small metric tile: label, value, optional note. */
+	.stat {
+		border: 1px solid var(--color-rule-soft);
+		border-radius: var(--radius-tile);
+		background: var(--color-panel);
+		padding: 0.75rem 1rem;
+		min-width: 0;
+	}
 	.quick {
 		display: flex;
 		align-items: center;

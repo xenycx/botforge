@@ -41,14 +41,16 @@
 	<li class="flex gap-3"><span class="step-no">4</span><span class="min-w-0 flex-1 break-words">{gh ? 'Register the app, then generate a client secret.' : 'Copy the Client ID and reset the Client Secret.'} Paste both here.</span></li>
 </ol>
 
-<div class="mt-4 grid gap-3 sm:grid-cols-2">
-	<label class="block">
-		<span class="label">Client ID</span>
-		<input class="field font-mono" autocomplete="off" spellcheck="false" bind:value={clientId} disabled={locked} placeholder={gh ? 'Ov23li…' : '1234567890…'} />
-	</label>
-	<label class="block">
-		<span class="label">Client secret</span>
-		<input class="field font-mono" type="password" autocomplete="new-password" spellcheck="false" bind:value={secret} disabled={locked} placeholder={secretSet ? '•••••••• (saved; leave empty to keep)' : ''} />
-	</label>
+<div class="@container">
+	<div class="mt-4 grid gap-3 @md:grid-cols-2">
+		<label class="block">
+			<span class="label">Client ID</span>
+			<input class="field font-mono" autocomplete="off" spellcheck="false" bind:value={clientId} disabled={locked} placeholder={gh ? 'Ov23li…' : '1234567890…'} />
+		</label>
+		<label class="block">
+			<span class="label">Client secret</span>
+			<input class="field font-mono" type="password" autocomplete="new-password" spellcheck="false" bind:value={secret} disabled={locked} placeholder={secretSet ? '•••••••• (saved; leave empty to keep)' : ''} />
+		</label>
+	</div>
 </div>
 {#if locked}<p class="help">Set in the environment file; change it there.</p>{/if}

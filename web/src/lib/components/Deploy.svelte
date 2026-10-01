@@ -162,7 +162,7 @@
 
 	{#if link}
 		<!-- The release: what runs now and what would come next. -->
-		<section class="spine border border-rule-soft bg-panel py-4 pr-4 pl-6" data-tone={link.deploying ? 'warn' : link.last_error ? 'fail' : link.last_sha ? 'run' : 'idle'} data-busy={link.deploying} aria-label="Current release">
+		<section class="spine overflow-hidden rounded-tile border border-rule-soft bg-panel py-4 pr-4 pl-6" data-tone={link.deploying ? 'warn' : link.last_error ? 'fail' : link.last_sha ? 'run' : 'idle'} data-busy={link.deploying} aria-label="Current release">
 			<div class="flex flex-wrap items-start gap-3">
 				<div class="min-w-0 flex-1">
 					<p class="flex items-center gap-2 text-title font-semibold"><Icon name="github" /><span class="break-all">{link.full_name}</span></p>
@@ -227,7 +227,7 @@
 		<section class="mt-8" aria-labelledby="dep-history">
 			<h3 id="dep-history" class="text-title font-semibold">History</h3>
 			{#if history.length}
-				<ul class="mt-2 border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+				<ul class="mt-2 list-card">
 					{#each history as op, i (op.id)}
 						<OperationRow {op} {now} initiallyOpen={op.id === wanted}>
 							{#snippet actions()}
@@ -249,7 +249,7 @@
 		<GitHubPublish {bot} {link} {conn} {admin} onqueued={() => load().catch(() => {})} />
 	</div>
 	{#if !link && history.some((o) => o.kind === 'publish')}
-		<ul class="mt-4 border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+		<ul class="mt-4 list-card">
 			{#each history.filter((o) => o.kind === 'publish').slice(0, 3) as op (op.id)}<OperationRow {op} {now} />{/each}
 		</ul>
 	{/if}

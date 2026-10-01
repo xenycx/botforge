@@ -194,7 +194,7 @@
 {#if session.user && !bare}
 	<a href="#main" class="sr-only z-50 bg-raised px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:rounded-control focus:shadow-overlay">Skip to content</a>
 	<div class="lg:grid {sidebarCollapsed ? 'lg:grid-cols-[72px_minmax(0,1fr)]' : 'lg:grid-cols-[16.5rem_minmax(0,1fr)]'} lg:transition-[grid-template-columns] lg:duration-200">
-		<aside class="sidebar sticky top-0 hidden h-dvh flex-col overflow-y-auto border-r border-rule-soft px-3 py-5 lg:flex" aria-label="Sidebar">
+		<aside class="sidebar sticky top-0 z-40 hidden h-dvh flex-col overflow-y-auto border-r border-rule-soft px-3 py-5 lg:flex" aria-label="Sidebar">
 			{@render sidebar(sidebarCollapsed, true)}
 		</aside>
 		<div class="min-w-0">

@@ -118,7 +118,7 @@
 {#if error}<Notice tone="fail" class="mt-3">{error}</Notice>{/if}
 
 {#if customize && data}
-	<div class="mt-3 border border-rule-soft bg-panel p-3">
+	<div class="mt-3 rounded-tile border border-rule-soft bg-panel p-3">
 		<p class="mb-2 text-muted">Choose what appears on this dashboard and rename it. Saved in this browser.</p>
 		<div class="grid gap-2 sm:grid-cols-2">
 			{#each data.stats as s (s.name)}
@@ -135,7 +135,7 @@
 {/if}
 
 {#if showSetup}
-	<div class="mt-3 border border-rule-soft bg-panel p-4">
+	<div class="mt-3 rounded-tile border border-rule-soft bg-panel p-4">
 		<h2 class="text-title font-semibold">Send stats from your bot</h2>
 		<ol class="mt-2 list-decimal space-y-1 pl-5">
 			<li>Generate a key{#if !stopped} <span class="text-warn">(stop the bot first: the key is stored in its environment)</span>{/if}. It is added to the bot as <code class="font-mono">BOTPANEL_TELEMETRY_KEY</code>, together with <code class="font-mono">BOTPANEL_URL</code> when the panel's public address is configured.</li>
@@ -174,7 +174,7 @@
 		<WidgetGrid widgets={data.widgets ?? []} {botId} {canAdmin} onRemoved={load} />
 		<div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 			{#each visible as s (s.name)}
-				<div class="border border-rule-soft bg-panel p-3">
+				<div class="rounded-tile border border-rule-soft bg-panel p-3">
 					<div class="text-muted">{label(s.name)}</div>
 					<div class="mt-0.5 text-2xl font-semibold tabular-nums">{fmt(s.latest)}</div>
 					<div class="mt-1"><Sparkline values={s.points.map((p) => p.v)} max={Math.max(1, ...s.points.map((p) => p.v))} label="{label(s.name)} over time" width={200} height={32} /></div>

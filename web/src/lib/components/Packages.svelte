@@ -88,9 +88,9 @@
 
 	{#each groups as g (g)}
 		<h3 class="mt-4 text-title font-semibold">{g}</h3>
-		<ul class="mt-1 divide-y divide-rule-soft border-y border-rule-soft">
+		<ul class="mt-1 list-card">
 			{#each pk.deps.filter((d) => d.group === g) as d (d.group + d.name)}
-				<li class="grid items-center gap-2 py-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]">
+				<li class="grid items-center gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]">
 					<code class="min-w-0 truncate font-mono text-[13px]">{d.name}</code>
 					<input class="field font-mono text-[13px]" bind:value={edits[d.group + d.name]} disabled={!d.editable} aria-label="Version of {d.name}" />
 					<div class="flex gap-1.5">
@@ -118,9 +118,9 @@
 		<label class="mt-2 flex items-center gap-2"><span class="text-muted">Add to</span><select class="field w-auto" bind:value={group}>{#each pk.groups ?? [] as g (g)}<option>{g}</option>{/each}</select></label>
 	{/if}
 	{#if results}
-		<ul class="mt-3 max-w-2xl divide-y divide-rule-soft border-y border-rule-soft">
+		<ul class="mt-3 max-w-2xl list-card">
 			{#each results as r (r.name)}
-				<li class="flex items-center gap-3 py-2">
+				<li class="flex items-center gap-3 px-3 py-2">
 					<div class="min-w-0 flex-1">
 						<div><span class="font-medium">{r.name}</span> <span class="text-muted">{r.version}</span></div>
 						{#if r.description}<div class="truncate text-muted">{r.description}</div>{/if}

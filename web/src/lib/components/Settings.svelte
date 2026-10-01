@@ -7,6 +7,7 @@
 	import { registerDirty } from '$lib/ui/guard.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
 	import Notice from '$lib/components/ui/Notice.svelte';
+	import SettingsSection from '$lib/components/ui/SettingsSection.svelte';
 	import { creatable, loadWorkspaces, workspaceName } from '$lib/workspaces.svelte';
 
 	let { bot, stopped, onSaved }: { bot: Bot; stopped: boolean; onSaved: (b: Bot) => void } = $props();
@@ -108,42 +109,42 @@
 	}
 </script>
 
-<form class="max-w-2xl" onsubmit={save}>
-	<fieldset class="grid gap-5" disabled={!stopped}>
-		<label class="block">
-			<span class="label">Name</span>
-			<input class="field" required maxlength="64" bind:value={form.name} />
-		</label>
-		<div class="grid gap-4 sm:grid-cols-3">
+<SettingsSection title="Name and resources" description="The host enforces these limits. A bot that uses more memory than its limit is stopped and restarted according to its restart policy. Changes need a stopped bot.">
+	<form onsubmit={save}>
+		<fieldset class="grid min-w-0 gap-5" disabled={!stopped}>
 			<label class="block">
-				<span class="label">Memory</span>
-				<span class="flex items-center gap-2"><input class="field" type="number" step="any" min="1" bind:value={form.memoryMiB} /><span class="text-muted">MiB</span></span>
-				{#if limits}<span class="help">{fmtBytes(minMem)} to {fmtBytes(limits.max_memory_bytes)}</span>{/if}
+				<span class="label">Name</span>
+				<input class="field" required maxlength="64" bind:value={form.name} />
 			</label>
-			<label class="block">
-				<span class="label">CPU</span>
-				<span class="flex items-center gap-2"><input class="field" type="number" step="any" min="0.01" bind:value={form.cpus} /><span class="text-muted">cores</span></span>
-				{#if limits}<span class="help">{limits.min_nano_cpus / 1e9} to {limits.max_nano_cpus / 1e9} cores</span>{/if}
-			</label>
-			<label class="block">
-				<span class="label">Processes</span>
-				<input class="field" type="number" step="1" min="1" max="4096" bind:value={form.pids} />
-				<span class="help">1 to 4096 at once</span>
-			</label>
+			<div class="grid gap-4 sm:grid-cols-3">
+				<label class="block">
+					<span class="label">Memory</span>
+					<span class="flex items-center gap-2"><input class="field" type="number" step="any" min="1" bind:value={form.memoryMiB} /><span class="text-muted">MiB</span></span>
+					{#if limits}<span class="help">{fmtBytes(minMem)} to {fmtBytes(limits.max_memory_bytes)}</span>{/if}
+				</label>
+				<label class="block">
+					<span class="label">CPU</span>
+					<span class="flex items-center gap-2"><input class="field" type="number" step="any" min="0.01" bind:value={form.cpus} /><span class="text-muted">cores</span></span>
+					{#if limits}<span class="help">{limits.min_nano_cpus / 1e9} to {limits.max_nano_cpus / 1e9} cores</span>{/if}
+				</label>
+				<label class="block">
+					<span class="label">Processes</span>
+					<input class="field" type="number" step="1" min="1" max="4096" bind:value={form.pids} />
+					<span class="help">1 to 4096 at once</span>
+				</label>
+			</div>
+			{#if rt?.has_build}<p class="text-small text-muted">Builds run separately with up to {fmtBytes(Math.max(rt.build_memory_bytes, form.memoryMiB * MiB))}.</p>{/if}
+		</fieldset>
+		{#if error}<Notice tone="fail" class="mt-4" live>{error}</Notice>{/if}
+		<div class="mt-5 flex flex-wrap items-center gap-3">
+			<button class="btn btn-primary" disabled={!stopped || !dirty || saving}>Save settings</button>
+			{#if dirty}<button type="button" class="btn btn-quiet" onclick={() => (form = { ...base })}>Discard changes</button><span class="text-small text-warn">Unsaved changes</span>{/if}
 		</div>
-		<p class="text-small text-muted">The host enforces these limits. A bot that uses more memory than its limit is stopped and restarted according to its restart policy.{#if rt?.has_build} Builds run separately with up to {fmtBytes(Math.max(rt.build_memory_bytes, form.memoryMiB * MiB))}.{/if}</p>
-	</fieldset>
-	{#if error}<Notice tone="fail" class="mt-4" live>{error}</Notice>{/if}
-	<div class="sticky bottom-0 mt-6 flex items-center gap-3 border-t border-rule-soft bg-paper/95 py-3 backdrop-blur-sm">
-		<button class="btn btn-primary" disabled={!stopped || !dirty || saving}>Save settings</button>
-		{#if dirty}<button type="button" class="btn btn-quiet" onclick={() => (form = { ...base })}>Discard changes</button><span class="text-small text-warn">Unsaved changes</span>{/if}
-	</div>
-</form>
+	</form>
+</SettingsSection>
 
-<section class="mt-10 max-w-2xl" aria-labelledby="tags-h">
-	<h3 id="tags-h" class="text-title font-semibold">Tags</h3>
-	<p class="mt-1 text-muted">Group bots on the Bots page, for example by team, server or environment. Everyone with access sees them.</p>
-	<form class="mt-3 flex flex-wrap items-start gap-2" onsubmit={saveTags}>
+<SettingsSection title="Tags" description="Group bots on the Bots page, for example by team, server or environment. Everyone with access sees them.">
+	<form class="flex flex-wrap items-start gap-2" onsubmit={saveTags}>
 		<label class="block min-w-0 flex-1 basis-64">
 			<span class="sr-only">Tags</span>
 			<input class="field" bind:value={tagText} placeholder="music, production" aria-invalid={tagError ? 'true' : undefined} aria-describedby="tags-help" />
@@ -151,25 +152,24 @@
 		</label>
 		<button class="btn">Save tags</button>
 	</form>
-</section>
+</SettingsSection>
 
 {#if (bot.permissions & 16) !== 0 && creatable().length > 1}
-	<section class="mt-10 max-w-2xl" aria-labelledby="ws-h">
-		<h3 id="ws-h" class="text-title font-semibold">Workspace</h3>
-		<p class="mt-1 text-muted">Everyone in the workspace can see this bot and act on it according to their role. Moving it changes who has access; per-bot sharing stays.</p>
-		<form class="mt-3 flex flex-wrap items-end gap-2" onsubmit={moveWorkspace}>
+	<SettingsSection title="Workspace" description="Everyone in the workspace can see this bot and act on it according to their role. Moving it changes who has access; per-bot sharing stays.">
+		<form class="flex flex-wrap items-end gap-2" onsubmit={moveWorkspace}>
 			<label class="block min-w-0 flex-1 basis-64"><span class="sr-only">Workspace</span>
 				<select class="field" bind:value={workspaceId}>{#each creatable() as w (w.id)}<option value={w.id}>{w.personal ? 'Personal' : w.name}</option>{/each}</select>
 			</label>
 			<button class="btn" disabled={workspaceId === bot.workspace_id}>Move bot</button>
 		</form>
-	</section>
+	</SettingsSection>
 {/if}
 
 {#if !bot.shared}
-	<section class="mt-12 max-w-2xl border-t border-rule-soft pt-5" aria-labelledby="danger-h">
-		<h3 id="danger-h" class="text-title font-semibold">Delete this bot</h3>
-		<p class="mt-1 text-muted">Removes the container, all files, environment variables, backups and history. This cannot be undone; create and download a backup first if you might need it.</p>
-		<button class="btn btn-danger mt-3" onclick={remove}>Delete bot…</button>
-	</section>
+	<SettingsSection title="Delete this bot" description="Removes the container, all files, environment variables, backups and history.">
+		<div class="flex flex-wrap items-center justify-between gap-3 rounded-tile border border-fail/30 bg-fail/5 px-4 py-3">
+			<p class="min-w-0 flex-1 basis-64 text-small">This cannot be undone. Create and download a backup first if you might need it.</p>
+			<button class="btn btn-danger" onclick={remove}>Delete bot…</button>
+		</div>
+	</SettingsSection>
 {/if}

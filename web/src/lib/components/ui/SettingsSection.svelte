@@ -15,7 +15,7 @@
 	}: { title: string; description?: string; badge?: Snippet; aside?: Snippet; children: Snippet; id?: string; class?: string } = $props();
 </script>
 
-<section class="@container border-t border-rule-soft py-7 first:border-t-0 first:pt-1 {cls}" aria-labelledby={id}>
+<section class="@container border-t border-rule-soft py-7 first-of-type:border-t-0 first-of-type:pt-1 {cls}" aria-labelledby={id}>
 	<div class="grid gap-x-10 gap-y-4 @3xl:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
 		<header class="min-w-0">
 			<h2 {id} class="flex flex-wrap items-center gap-2 text-title font-semibold">{title}{@render badge?.()}</h2>

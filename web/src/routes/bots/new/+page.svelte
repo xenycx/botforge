@@ -238,7 +238,7 @@
 					<button
 						role="radio"
 						aria-checked={source === o.id}
-						class="flex items-start gap-3 border bg-panel p-4 text-left transition-colors {source === o.id ? 'border-action ring-1 ring-action' : 'border-rule-soft hover:border-rule'}"
+						class="flex items-start gap-3 rounded-tile border bg-panel p-4 text-left transition-colors {source === o.id ? 'border-action ring-1 ring-action' : 'border-rule-soft hover:border-rule'}"
 						onclick={() => chooseSource(o.id as Source)}
 					>
 						<span class="mt-0.5 grid size-8 shrink-0 place-items-center {source === o.id ? 'bg-action text-white' : 'bg-paper text-ink'}"><Icon name={o.icon as 'box'} /></span>
@@ -259,7 +259,7 @@
 							<button
 								role="radio"
 								aria-checked={templateId === t.id}
-								class="flex flex-col border bg-panel p-4 text-left {templateId === t.id ? 'border-action ring-1 ring-action' : 'border-rule-soft hover:border-rule'}"
+								class="flex flex-col rounded-tile border bg-panel p-4 text-left {templateId === t.id ? 'border-action ring-1 ring-action' : 'border-rule-soft hover:border-rule'}"
 								onclick={() => pickTemplate(t)}
 							>
 								<span class="flex items-baseline justify-between gap-2"><span class="text-title font-semibold">{t.name}</span><span class="text-small text-muted">{t.language}</span></span>

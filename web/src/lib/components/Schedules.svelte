@@ -243,9 +243,9 @@
 	{#if list === null && !error}
 		<Skeleton rows={2} label="Loading schedules" />
 	{:else if list}
-		<ul class="border-y border-rule-soft bg-panel [&>li+li]:border-t [&>li+li]:border-rule-soft">
+		<ul class="list-card">
 			{#each list as s (s.id)}
-				<li class="spine flex flex-wrap items-center gap-x-4 gap-y-2 py-3 pr-2 pl-5" data-tone={tone(s)}>
+				<li class="spine flex flex-wrap items-center gap-x-4 gap-y-2 py-3 pr-3 pl-5" data-tone={tone(s)}>
 					<div class="min-w-0 flex-1 basis-64">
 						<p class="font-medium">
 							{actionLabel(s.action)} <span class="font-normal text-muted">·</span> {describeSpec(s.spec)}

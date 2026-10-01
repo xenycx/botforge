@@ -6,7 +6,7 @@
 	// Compact instrument strip: resource readings are secondary to state, so
 	// they sit in one line instead of three large cards. One SSE stream per
 	// open bot page; the fleet never opens these.
-	let { botId, cpuLimit }: { botId: string; cpuLimit: number } = $props();
+	let { botId, cpuLimit, compact = false }: { botId: string; cpuLimit: number; compact?: boolean } = $props();
 	let g = $state<Gauge | null>(null);
 	let link = $state<'connecting' | 'live' | 'lost'>('connecting');
 
@@ -33,17 +33,17 @@
 	);
 </script>
 
-<div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-small" aria-label="Resource usage">
+<div class="flex flex-wrap items-center {compact ? 'gap-x-4' : 'gap-x-6'} gap-y-2 text-small" aria-label="Resource usage">
 	{#if !g}
 		<span class="text-muted">{link === 'lost' ? 'Live usage is unavailable.' : 'Connecting to live usage…'}</span>
 	{:else}
 		{#each meters as m (m.k)}
-			<div class="flex min-w-36 items-center gap-2">
-				<span class="w-12 text-muted">{m.k}</span>
-				<span class="h-1.5 w-14 bg-paper-2" role="meter" aria-label="{m.k} usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(m.p)} aria-valuetext="{m.v} {m.of}">
+			<div class="flex {compact ? '' : 'min-w-36'} items-center gap-2" title={compact ? `${m.k}: ${m.v} ${m.of}` : undefined}>
+				<span class="{compact ? '' : 'w-12'} text-muted">{m.k}</span>
+				<span class="h-1.5 {compact ? 'w-10' : 'w-14'} overflow-hidden rounded-pill bg-paper-2" role="meter" aria-label="{m.k} usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(m.p)} aria-valuetext="{m.v} {m.of}">
 					<span class="block h-full {tone(m.p)}" style="width: {m.p}%"></span>
 				</span>
-				<span class="tabular-nums"><span class="font-medium">{m.v}</span> <span class="text-muted">{m.of}</span></span>
+				<span class="tabular-nums"><span class="font-medium">{m.v}</span>{#if !compact} <span class="text-muted">{m.of}</span>{/if}</span>
 			</div>
 		{/each}
 		{#if link !== 'live'}<span class="text-warn">Reconnecting…</span>{/if}

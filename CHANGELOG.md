@@ -78,13 +78,33 @@ authoritative current version.
   previous owner does not keep access through workspace membership.
 - GitHub webhook deliveries for a commit the panel itself pushed no longer
   redeploy (and restart) the bot.
+- The bot header is one compact bar (back, name, state, live usage, power
+  controls) that stays in view under the top bar, so most bot sections fit a
+  desktop screen without scrolling.
+- Files is a workbench sized to the window: a foldable explorer with an icon
+  toolbar, a full-height editor with a status bar, and a full-screen mode.
+- Health & alerts shows the heartbeat, probe and notification state side by
+  side, explains every probe setting, exposes the success threshold, links to
+  the SDK setup and the expanded health guide, and hides probe timing until a
+  probe type is chosen.
+- Bot Settings, Startup and Access, and the administration Sites, Host, Panel
+  settings and Diagnostics pages use the full width: explanations beside
+  controls, stat tiles, sign-in providers side by side, a budgets table, and
+  search and filters directly above the sites table.
+- Lists, notices, metric tiles and status panels follow the corner-style
+  preference instead of always being square.
 
 ### Fixed
 
+- AI provider error codes (for example rate-limit or authentication codes)
+  are now read from provider responses instead of being lost.
 - The session cap could evict the newest session instead of the oldest when
   several sessions were created in the same millisecond.
 - The OAuth provider setup steps (administration settings and the setup
   wizard) no longer scroll sideways on phones.
+- The workspace switcher in the collapsed sidebar opens beside the rail above
+  the page instead of underneath page content, and row menus in rounded or
+  scrolling lists are no longer clipped.
 - `go.mod` now lists `golang.org/x/net`, `golang.org/x/mod`,
   `github.com/pkg/sftp`, and `github.com/docker/go-connections` as direct
   requirements.

@@ -90,21 +90,30 @@
 <svelte:head><title>Panel settings · BotForge</title></svelte:head>
 
 <h2 class="text-section">Panel settings</h2>
-<p class="mt-1 max-w-prose text-muted">Applied immediately, without a restart. Values set in the environment file are shown read-only and always win.</p>
+<p class="mt-1 max-w-3xl text-muted">Applied immediately, without a restart. Values set in the environment file are shown read-only and always win.</p>
 {#if warning}<Notice tone="warn" class="mt-3" title="Setup finished, but some settings were not saved">{warning}</Notice>{/if}
 {#if error}<Notice tone="fail" class="mt-3" live>{error}</Notice>{/if}
 
 {#if !v && !error}
 	<div class="mt-4"><Skeleton rows={4} label="Loading settings" /></div>
 {:else if v}
-	<form class="mt-6 grid w-full min-w-0 max-w-3xl grid-cols-[minmax(0,1fr)] gap-6" onsubmit={save}>
-		<section class="card p-5 sm:p-6">
-			<h3 class="text-title font-semibold">Panel address</h3>
+	<form class="mt-6 grid w-full min-w-0 grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-2" onsubmit={save}>
+		<section class="card flex flex-col p-5 sm:p-6">
+			<div class="flex items-center gap-2"><Icon name="globe" size={18} class="text-muted" /><h3 class="text-title font-semibold">Panel address</h3></div>
 			<p class="mt-1 text-small text-muted">The https origin people use to reach this panel. Sign-in providers return to it, and bots send statistics to it.</p>
-			<label class="mt-3 block max-w-md">
+			<label class="mt-auto block pt-4">
 				<span class="sr-only">Panel address</span>
 				<input class="field font-mono" bind:value={publicUrl} disabled={v.locked.public_url} placeholder="https://panel.example.com" />
 				{#if v.locked.public_url}<span class="help">Set in the environment file (BOTPANEL_PUBLIC_URL).</span>{/if}
+			</label>
+		</section>
+
+		<section class="card flex flex-col p-5 sm:p-6">
+			<div class="flex items-center gap-2"><Icon name="users" size={18} class="text-muted" /><h3 class="text-title font-semibold">Registration</h3><span class="pill ml-auto" data-tone={signup ? 'run' : 'idle'}>{signup ? 'Open' : 'Closed'}</span></div>
+			<p class="mt-1 text-small text-muted">Who can create an account without an administrator.</p>
+			<label class="mt-auto flex items-start gap-2.5 pt-4">
+				<input type="checkbox" class="mt-0.5" bind:checked={signup} disabled={v.locked.oauth_allow_signup} />
+				<span>Allow new accounts from invitations, GitHub, or Discord<span class="help">Turn this off to stop every self-registration path. Administrators can still create accounts directly. Provider identities are never merged into an account by matching email.</span></span>
 			</label>
 		</section>
 
@@ -128,15 +137,7 @@
 			</section>
 		{/each}
 
-		<section class="card p-5 sm:p-6">
-			<h3 class="text-title font-semibold">Registration</h3>
-			<label class="mt-3 flex items-start gap-2.5">
-				<input type="checkbox" class="mt-0.5" bind:checked={signup} disabled={v.locked.oauth_allow_signup} />
-				<span>Allow new accounts from invitations, GitHub, or Discord<span class="help">Turn this off to stop every self-registration path. Administrators can still create accounts directly. Provider identities are never merged into an account by matching email.</span></span>
-			</label>
-		</section>
-
-		<div class="sticky bottom-4 flex justify-end"><button class="btn btn-primary shadow-overlay" disabled={saving}>{saving ? 'Saving…' : 'Save and apply'}</button></div>
+		<div class="sticky bottom-4 flex justify-end xl:col-span-2"><button class="btn btn-primary shadow-overlay" disabled={saving}>{saving ? 'Saving…' : 'Save and apply'}</button></div>
 	</form>
 	<div class="mt-8 grid w-full min-w-0 max-w-3xl gap-6"><AISettings /></div>
 {/if}

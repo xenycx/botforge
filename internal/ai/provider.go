@@ -104,7 +104,8 @@ func parseProviderError(resp *http.Response) error {
 	msg := strings.TrimSpace(string(b))
 	var v struct {
 		Error struct {
-			Message, Code string `json:"message"`
+			Message string `json:"message"`
+			Code    string `json:"code"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(b, &v) == nil && v.Error.Message != "" {
