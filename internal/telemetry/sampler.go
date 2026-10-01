@@ -33,8 +33,8 @@ type Reader interface {
 	Disk(path string) (used, total int64, err error)
 }
 
-// ProcReader reads Linux /proc (Root is normally "/proc").
-type ProcReader struct{ Root string }
+// ProcReader reads Linux /proc (Root is normally "/proc") and /sys (SysRoot).
+type ProcReader struct{ Root, SysRoot string }
 
 func (p ProcReader) root() string {
 	if p.Root == "" {
@@ -159,6 +159,9 @@ type Sampler struct {
 
 	primed              bool
 	lastBusy, lastTotal uint64
+	lastCounters        Counters
+	lastCountersAt      time.Time
+	haveCounters        bool
 }
 
 func (s *Sampler) now() time.Time {
@@ -202,11 +205,42 @@ func (s *Sampler) SampleOnce(ctx context.Context) (stored bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	err = s.Store.InsertTelemetry(ctx, domain.Telemetry{
+	t := domain.Telemetry{
 		NodeID: s.NodeID, SampledAtMS: s.now().UnixMilli(), CPUPercent: pct, LogicalCPUs: cpus,
 		MemoryUsedBytes: mu, MemoryTotalBytes: mt, DiskUsedBytes: du, DiskTotalBytes: dt, RunningBots: running,
-	})
+	}
+	s.addCounters(&t)
+	err = s.Store.InsertTelemetry(ctx, t)
 	return err == nil, err
+}
+
+// addCounters fills load, swap and the network and disk rates. The cumulative
+// counters need two readings, so the first sample after a start has rates of
+// zero. A counter that went backwards (interface reset, reboot) also yields 0.
+func (s *Sampler) addCounters(t *domain.Telemetry) {
+	hr, ok := s.Reader.(HostReader)
+	if !ok {
+		return
+	}
+	c, err := hr.Counters()
+	if err != nil {
+		return
+	}
+	now := s.now()
+	t.Load1, t.SwapUsedBytes, t.SwapTotalBytes = c.Load1, c.SwapUsed, c.SwapTotal
+	if s.haveCounters {
+		if dt := now.Sub(s.lastCountersAt).Seconds(); dt > 0 {
+			rate := func(cur, prev uint64) int64 {
+				if cur < prev {
+					return 0
+				}
+				return int64(float64(cur-prev) / dt)
+			}
+			t.NetRxBps, t.NetTxBps = rate(c.NetRx, s.lastCounters.NetRx), rate(c.NetTx, s.lastCounters.NetTx)
+			t.DiskReadBps, t.DiskWriteBps = rate(c.DiskRead, s.lastCounters.DiskRead), rate(c.DiskWrite, s.lastCounters.DiskWrite)
+		}
+	}
+	s.lastCounters, s.lastCountersAt, s.haveCounters = c, now, true
 }
 
 // Prune deletes samples older than the retention window in bounded batches and

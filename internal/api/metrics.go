@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+
+	"botpanel/internal/hostmon"
 )
 
 // panelMetrics intentionally exports bounded, low-cardinality aggregates. Bot
@@ -24,6 +26,15 @@ type panelMetrics struct {
 }
 
 func newPanelMetrics() *panelMetrics { return &panelMetrics{started: time.Now()} }
+
+// stats is the same set of counters the Host page shows.
+func (m *panelMetrics) stats() hostmon.HTTPStats {
+	st := hostmon.HTTPStats{Requests: m.requests.Load(), Errors: m.errors.Load(), InFlight: m.inflight.Load()}
+	if st.Requests > 0 {
+		st.AvgMS = float64(m.durationNS.Load()) / float64(st.Requests) / 1e6
+	}
+	return st
+}
 
 func (m *panelMetrics) observe(c fiber.Ctx) error {
 	start := time.Now()

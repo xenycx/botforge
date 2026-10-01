@@ -87,6 +87,12 @@ registry mirror), `BOTPANEL_KEY_DIR`/`BOTPANEL_ACTIVE_KEY_ID`.
 
 ### Prometheus metrics
 
+Most variables can also be changed from **Administration → Environment**; those
+values are stored in the database and win over the environment file after the
+next restart (`botpanel env reset` removes them from the host). The systemd unit
+restarts the panel after the page's **Restart panel** button because the button
+exits with code 75 and the unit has `Restart=on-failure`.
+
 Set `BOTPANEL_METRICS_TOKEN` to a random secret of at least 24 characters to
 enable `GET /metrics`. Scrapers must send `Authorization: Bearer <token>`.
 Leaving the variable empty keeps the endpoint disabled. Metrics cover process

@@ -1,83 +1,153 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api/client';
-	import type { Bot } from '$lib/api/types';
+	import type { Bot, Site } from '$lib/api/types';
+	import type { EnvView } from '$lib/api/admin';
 	import { describe } from '$lib/status';
-	import { session } from '$lib/session.svelte';
+	import { session, logout } from '$lib/session.svelte';
+	import { chat, type Conversation } from '$lib/ai/chat.svelte';
+	import { cycleTheme, theme } from '$lib/ui/theme.svelte';
+	import { workspaces } from '$lib/workspaces.svelte';
+	import { adminPages, botTabs, docs, groups, pages, score, scopes, type Entry, type Scope } from '$lib/search';
 	import Dialog from '$lib/components/ui/Dialog.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
 
-	// Jump to any bot or page: Ctrl+K (Cmd+K) anywhere, or the header button.
+	// Jump to anything: bots and their sections, sites, every page, settings and
+	// administration section, environment variables, people, AI chats and the
+	// documentation, or run an action. Ctrl+K (Cmd+K) anywhere, or the header
+	// button. Several words narrow the search; Tab switches the scope.
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
 	let q = $state('');
-	let bots = $state<Bot[]>([]);
-	// Enter pressed before the bot list arrived waits for it, so fast typing
-	// still lands on the bot rather than on nothing.
-	let loading: Promise<void> = Promise.resolve();
+	let scope = $state<Scope>('all');
 	let active = $state(0);
 	let list: HTMLUListElement | undefined = $state();
 
-	type Item = { key: string; label: string; hint: string; href: string; icon: 'box' | 'plus' | 'activity' | 'gear' | 'shield' | 'key' | 'link' };
-	const pages = $derived<Item[]>([
-		{ key: 'p-new', label: 'New bot', hint: 'Create a bot', href: '/bots/new', icon: 'plus' },
-		{ key: 'p-bots', label: 'Bots', hint: 'All bots', href: '/dashboard', icon: 'box' },
-		{ key: 'p-activity', label: 'Activity', hint: 'Work and changes', href: '/activity', icon: 'activity' },
-		{ key: 'p-security', label: 'Security', hint: 'Settings', href: '/settings/security', icon: 'shield' },
-		{ key: 'p-accounts', label: 'Connected accounts', hint: 'Settings', href: '/settings/connected-accounts', icon: 'link' },
-		{ key: 'p-sftp', label: 'SFTP and API keys', hint: 'Settings', href: '/settings/sftp', icon: 'key' },
-		...(session.user?.role === 'admin'
-			? [
-					{ key: 'p-users', label: 'Users', hint: 'Administration', href: '/admin/users', icon: 'gear' as const },
-					{ key: 'p-diag', label: 'Diagnostics', hint: 'Administration', href: '/admin/diagnostics', icon: 'shield' as const }
-				]
-			: [])
-	]);
+	let bots = $state<Bot[]>([]);
+	let sites = $state<Site[]>([]);
+	let people = $state<{ id: string; email: string; display_name?: string; role: string }[]>([]);
+	let envNames = $state<{ name: string; description: string }[]>([]);
+	let chats = $state<Conversation[]>([]);
+	// Enter pressed before the lists arrived waits for them, so fast typing
+	// still lands on the right thing.
+	let loading: Promise<unknown> = Promise.resolve();
+
+	const isAdmin = $derived(session.user?.role === 'admin');
+	const aiOn = $derived(session.features.ai);
 
 	$effect(() => {
 		if (!open) return;
 		q = '';
+		scope = 'all';
 		active = 0;
-		loading = api<{ bots: Bot[] }>('GET', '/bots')
-			.then((r) => {
-				bots = r.bots;
-			})
-			.catch(() => {});
+		const jobs: Promise<unknown>[] = [api<{ bots: Bot[] }>('GET', '/bots').then((r) => (bots = r.bots))];
+		if (session.features.sites) jobs.push(api<{ sites: Site[] }>('GET', '/sites').then((r) => (sites = r.sites)));
+		if (aiOn) jobs.push(api<{ conversations: Conversation[] }>('GET', '/ai/conversations').then((r) => (chats = r.conversations)));
+		if (isAdmin) {
+			jobs.push(api<{ users: typeof people }>('GET', '/users').then((r) => (people = r.users)));
+			jobs.push(api<EnvView>('GET', '/admin/environment').then((r) => (envNames = r.vars.map((v) => ({ name: v.name, description: v.description })))));
+		}
+		loading = Promise.allSettled(jobs);
 	});
 
-	// Simple subsequence match, best when the letters appear early and together.
-	function score(text: string, needle: string): number {
-		if (!needle) return 1;
-		const t = text.toLowerCase();
-		const i = t.indexOf(needle);
-		if (i >= 0) return 100 - i;
-		let pos = 0;
-		for (const ch of needle) {
-			pos = t.indexOf(ch, pos);
-			if (pos < 0) return 0;
-			pos++;
+	const actions = $derived.by<Entry[]>(() => {
+		const a: Entry[] = [
+			{ key: 'x-newbot', group: 'action', label: 'New bot', hint: 'Create a bot', icon: 'plus', href: '/bots/new', words: 'create add deploy start', pinned: true },
+			...(session.features.sites ? [{ key: 'x-newsite', group: 'action', label: 'New site', hint: 'Host a static site', icon: 'plus' as const, href: '/sites', words: 'create add static website host' }] : []),
+			{ key: 'x-theme', group: 'action', label: 'Switch theme', hint: `Now: ${theme.pref === 'system' ? 'follow system' : theme.pref}. Light, dark, system`, icon: 'moon', run: cycleTheme, words: 'dark light mode appearance' },
+			{ key: 'x-logout', group: 'action', label: 'Sign out', hint: session.user?.email ?? '', icon: 'logout', run: () => void logout(), words: 'log out exit' }
+		];
+		if (aiOn) {
+			a.unshift(
+				{ key: 'x-ai', group: 'action', label: 'Ask AI', hint: 'Open the assistant (Ctrl+.)', icon: 'sparkle', run: () => chat.show(), words: 'assistant chat help gpt llm question', pinned: true },
+				{ key: 'x-ai-new', group: 'action', label: 'New AI chat', hint: 'Start a fresh conversation', icon: 'sparkle', run: () => { chat.newChat(); chat.show(); }, words: 'assistant conversation clear' }
+			);
 		}
-		return 10;
-	}
-	const items = $derived.by(() => {
-		const needle = q.trim().toLowerCase();
-		const botItems: (Item & { s: number })[] = bots.map((b) => ({
-			key: b.id,
-			label: b.name,
-			hint: `${describe(b).label}, ${b.runtime}${b.tags.length ? `, ${b.tags.join(' ')}` : ''}`,
-			href: `/bots/${b.id}`,
-			icon: 'box' as const,
-			s: score(b.name + ' ' + b.tags.join(' '), needle) + (b.favorite ? 5 : 0)
-		}));
-		const pageItems = pages.map((p) => ({ ...p, s: score(p.label, needle) - 1 }));
-		return [...botItems, ...pageItems].filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 12);
+		if (isAdmin) a.push({ key: 'x-diag', group: 'action', label: 'Run diagnostics', hint: 'Check Docker, disk, keys and backups', icon: 'shield', href: '/admin/diagnostics', words: 'doctor health check status' });
+		return a;
 	});
+
+	const catalog = $derived.by<Entry[]>(() => {
+		const out: Entry[] = [...actions, ...pages];
+		for (const b of bots) {
+			const d = describe(b);
+			out.push({ key: `b-${b.id}`, group: 'bot', label: b.name, hint: `${d.label} · ${b.runtime}${b.tags.length ? ` · ${b.tags.join(' ')}` : ''}`, icon: 'box', href: `/bots/${b.id}`, words: `${b.tags.join(' ')} ${b.runtime} ${b.owner_id === session.user?.id ? '' : 'shared'}`, boost: b.favorite ? 8 : 0 });
+		}
+		for (const s of sites) out.push({ key: `si-${s.id}`, group: 'site', label: s.name, hint: `Site · ${s.slug}${s.workspace_name ? ` · ${s.workspace_name}` : ''}`, icon: 'globe', href: `/sites/${s.id}`, words: s.slug });
+		for (const c of chats.slice(0, 30)) out.push({ key: `c-${c.id}`, group: 'chat', label: c.title || 'Untitled chat', hint: 'AI chat', icon: 'sparkle', run: () => { chat.show(); void chat.openConversation(c); } });
+		for (const w of workspaces.list) out.push({ key: `w-${w.id}`, group: 'person', label: w.name, hint: 'Workspace', icon: 'building', href: isAdmin ? `/admin/workspaces/${w.id}` : `/settings/workspaces/${w.id}` });
+		out.push(...docs.map((d) => ({ ...d, boost: -10 })));
+		if (isAdmin) {
+			out.push(...adminPages);
+			for (const p of people) out.push({ key: `u-${p.id}`, group: 'person', label: p.display_name || p.email, hint: `${p.email} · ${p.role}`, icon: 'users', href: `/admin/users/${p.id}`, words: p.email });
+			for (const v of envNames) out.push({ key: `e-${v.name}`, group: 'env', label: v.name, hint: v.description, icon: 'sliders', href: `/admin/environment?find=${v.name}`, boost: -70 });
+		}
+		return out;
+	});
+
+	const inScope = (e: Entry, sc: Scope) => sc === 'all' || groups.find((g) => g.id === e.group)?.scope === sc;
+	const groupOrder = (e: Entry) => groups.findIndex((g) => g.id === e.group);
+	const MAX = 40;
+
+	const items = $derived.by<Entry[]>(() => {
+		let text = q.trim();
+		let sc = scope;
+		if (text.startsWith('>')) {
+			sc = 'actions';
+			text = text.slice(1).trim();
+		}
+		const base = catalog.filter((e) => inScope(e, sc));
+		let found: (Entry & { s: number })[];
+		if (!text) {
+			// Nothing typed: everything, grouped, with the common actions first.
+			found = base.map((e) => ({ ...e, s: 1 }));
+			found.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || groupOrder(a) - groupOrder(b));
+			const pinned = found.filter((e) => e.pinned);
+			const rest = found.filter((e) => !e.pinned);
+			return [...pinned, ...rest];
+		}
+		found = base.map((e) => ({ ...e, s: score(e, text) })).filter((e) => e.s > 0).map((e) => ({ ...e, s: e.s + (e.boost ?? 0) })).filter((e) => e.s > 0);
+		// "bluntly files": the best matching bots also offer their own sections.
+		const words = text.toLowerCase().split(/\s+/);
+		if (sc === 'all' || sc === 'bots') {
+			for (const b of bots) {
+				const name = b.name.toLowerCase();
+				if (!words.some((w) => name.includes(w))) continue;
+				const rest = words.filter((w) => !name.includes(w)).join(' ');
+				for (const t of botTabs) {
+					const s = rest ? score({ label: t.label, hint: '', words: t.words }, rest) : 1;
+					if (s > 0) found.push({ key: `bt-${b.id}-${t.id}`, group: 'bot-tab', label: `${b.name} › ${t.label}`, hint: rest ? 'Bot section' : 'Bot section', icon: t.icon, href: `/bots/${b.id}?tab=${t.id}`, s: rest ? s - 2 : 2 });
+				}
+			}
+		}
+		found.sort((a, b) => b.s - a.s || groupOrder(a) - groupOrder(b));
+		const top = found.slice(0, MAX);
+		// Keep the groups together, best group (by its best hit) first.
+		const best = new Map<string, number>();
+		for (const e of top) best.set(e.group, Math.max(best.get(e.group) ?? 0, e.s));
+		top.sort((a, b) => (best.get(b.group)! - best.get(a.group)!) || groupOrder(a) - groupOrder(b) || b.s - a.s);
+		if (aiOn && (sc === 'all' || sc === 'actions' || sc === 'chats')) {
+			top.push({ key: 'x-ask', group: 'action', label: `Ask AI: “${text}”`, hint: 'Send this question to the assistant', icon: 'sparkle', run: () => void chat.ask(text, false), s: 0 });
+		}
+		return top;
+	});
+	// Group heading shown above the first item of each run.
+	const headings = $derived(items.map((e, i) => (i === 0 || e.group !== items[i - 1].group || (q.trim() === '' && e.pinned !== items[i - 1].pinned) ? (q.trim() === '' && e.pinned ? 'Suggested' : (groups.find((g) => g.id === e.group)?.label ?? '')) : '')));
 
 	function choose(i: number) {
 		const it = items[i];
 		if (!it) return;
 		open = false;
-		goto(it.href);
+		if (it.run) it.run();
+		else if (it.href) {
+			if (it.href.startsWith('/api/')) window.open(it.href, '_blank', 'noopener');
+			else goto(it.href);
+		}
+	}
+	function cycleScope(dir: 1 | -1) {
+		const i = scopes.findIndex((s) => s.id === scope);
+		scope = scopes[(i + dir + scopes.length) % scopes.length].id;
+		active = 0;
 	}
 	function onkey(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown') {
@@ -86,9 +156,12 @@
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			active = Math.max(0, active - 1);
+		} else if (e.key === 'Tab') {
+			e.preventDefault();
+			cycleScope(e.shiftKey ? -1 : 1);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
-			loading.then(() => choose(active));
+			void loading.then(() => choose(active));
 		}
 		queueMicrotask(() => list?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' }));
 	}
@@ -98,17 +171,22 @@
 			open = !open;
 		}
 	}
+	const counts = $derived.by(() => {
+		const c: Record<string, number> = {};
+		for (const s of scopes) c[s.id] = catalog.filter((e) => inScope(e, s.id)).length;
+		return c;
+	});
 </script>
 
 <svelte:window onkeydown={global} />
 
-<Dialog bind:open title="Go to" size="md">
+<Dialog bind:open title="Go to" size="lg">
 	<label class="relative block">
-		<span class="sr-only">Search bots and pages</span>
+		<span class="sr-only">Search bots, sites, pages, settings and actions</span>
 		<Icon name="search" class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted" />
 		<input
 			class="field pl-8"
-			placeholder="Bot name, tag or page"
+			placeholder="Search bots, pages, settings, users, variables… or type > for actions"
 			bind:value={q}
 			oninput={() => (active = 0)}
 			onkeydown={onkey}
@@ -120,14 +198,20 @@
 			data-autofocus
 		/>
 	</label>
-	<ul bind:this={list} id="palette-list" role="listbox" aria-label="Results" class="mt-2 max-h-80 overflow-y-auto pb-2">
+	<div class="mt-2 flex flex-wrap gap-1" role="group" aria-label="Search in">
+		{#each scopes.filter((s) => s.id === 'all' || counts[s.id] > 0) as s (s.id)}
+			<button type="button" tabindex="-1" class="rounded-pill border px-2.5 py-0.5 text-small {scope === s.id ? 'border-action bg-action/10 font-medium text-ink' : 'border-rule-soft text-muted hover:text-ink'}" aria-pressed={scope === s.id} onclick={() => { scope = s.id; active = 0; }}>{s.label}</button>
+		{/each}
+	</div>
+	<ul bind:this={list} id="palette-list" role="listbox" aria-label="Results" class="mt-2 max-h-[min(26rem,55vh)] overflow-y-auto pb-2">
 		{#each items as it, i (it.key)}
+			{#if headings[i]}<li role="presentation" class="eyebrow px-2 pt-3 pb-1 first:pt-1">{headings[i]}</li>{/if}
 			<li
 				id="pal-{it.key}"
 				data-i={i}
 				role="option"
 				aria-selected={i === active}
-				class="flex cursor-pointer items-center gap-3 rounded-control px-2 py-2 {i === active ? 'bg-paper' : ''}"
+				class="flex cursor-pointer items-center gap-3 rounded-control px-2 py-1.5 {i === active ? 'bg-paper' : ''}"
 				onmousemove={() => (active = i)}
 				onclick={() => choose(i)}
 				onkeydown={() => {}}
@@ -137,7 +221,8 @@
 				{#if i === active}<kbd class="text-small text-muted">Enter</kbd>{/if}
 			</li>
 		{:else}
-			<li class="px-2 py-3 text-muted">Nothing matches “{q}”.</li>
+			<li class="px-2 py-3 text-muted">Nothing matches “{q}”{scope !== 'all' ? ` in ${scopes.find((s) => s.id === scope)?.label}` : ''}.{#if aiOn} Press Tab to widen the search, or ask the assistant.{/if}</li>
 		{/each}
 	</ul>
+	<p class="mt-1 border-t border-rule-soft pt-2 text-small text-muted"><kbd>↑</kbd> <kbd>↓</kbd> move · <kbd>Enter</kbd> open · <kbd>Tab</kbd> change scope · several words narrow the search</p>
 </Dialog>

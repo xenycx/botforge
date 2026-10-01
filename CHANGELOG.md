@@ -6,6 +6,64 @@ authoritative current version.
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-01
+
+### Added
+
+- **Host page rebuilt** (Administration → Host) as four tabs. *Resources* shows
+  live CPU, memory (with cache and swap), load average, disk, network and disk
+  throughput, with history charts for 1 hour to 30 days (averages with the
+  peaks kept as dashed lines, hover read-outs), a disk-fill forecast, the
+  machine (OS, kernel, CPU, uptime), the BotForge process (memory, goroutines,
+  open files, request counts and errors, database size), the Docker runner
+  (version, cgroups, containers, builds, queue) and storage per location with
+  filesystem and inode use. A "needs attention" list calls out a nearly full
+  disk, memory pressure, a Docker problem, an overloaded CPU or recent errors.
+  *Bots* lists every bot with its CPU, memory against its limit, network,
+  processes and workspace size, sortable and refreshed every 10 seconds.
+  *Capacity* keeps the admission budgets and now shows each limit's current
+  value and where it comes from. *Panel logs* tails the panel's own log from
+  memory with level filter, search, live follow, expandable fields, copy and
+  download; secrets, tokens and passwords are redacted before a line is kept.
+  Host samples now also record load, swap, network and disk throughput
+  (migration `0032`).
+- **Environment page** (Administration → Environment): every `BOTPANEL_`
+  variable with its description, default and source (default, environment file
+  or set here), editable from the browser. Values are checked, including the
+  whole configuration, before they are stored; secrets (the metrics token) are
+  stored encrypted and never shown. Changes apply after a restart; the page
+  shows what is waiting, and a **Restart panel** button (exit code 75, for
+  systemd or a container restart policy) appears when a supervisor is
+  detected. Variables read before the database opens or able to lock the panel
+  out stay in the environment file (migration `0031`). `botpanel env` and
+  `botpanel env reset` list and drop the saved values from the host if a bad
+  save ever has to be undone; a saved set that no longer validates is ignored
+  at start and reported on the page instead of stopping the panel.
+- **Go to (Ctrl+K)** now finds everything: every page, your settings, every
+  administration section, the Host tabs, panel logs, environment variables,
+  AI provider and research settings, documentation sections, bots and their
+  sections (`bluntly files`), sites, users, workspaces, AI chats and actions
+  (Ask AI, new chat, new bot, switch theme, sign out). Several words narrow
+  the search, Tab switches between scopes, `>` lists actions only, and an
+  empty search lists everything grouped.
+
+### Changed
+
+- The AI settings in Panel settings use the full width: providers on the left,
+  web research on the right, a guided provider form (presets for DeepSeek,
+  OpenAI, OpenRouter or a custom endpoint, required fields marked, tuning and
+  pricing folded away under an **Optional** heading) and an **Optional** tag on
+  every field that can be skipped.
+- Administration → Host moved its budgets table to the Capacity tab; the
+  `/api/v1/nodes/:id/telemetry` samples gain `load1`, swap, network and disk
+  throughput fields.
+
+### Security
+
+- Environment edits, restarts and panel-log reads are administrator-only, and
+  edits and restarts are recorded in the activity log by variable name, never
+  by value.
+
 ## 0.3.0 - 2026-10-01
 
 ### Added

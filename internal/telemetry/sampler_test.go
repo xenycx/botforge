@@ -173,10 +173,10 @@ func TestRetentionPrunesInBoundedBatches(t *testing.T) {
 	fresh := now.Add(-time.Hour).UnixMilli()
 	tx, _ := db.BeginTx(ctx, nil)
 	for i := 0; i < 2500; i++ {
-		tx.ExecContext(ctx, `INSERT INTO node_telemetry VALUES (?,?,1,1,1,2,1,2,0)`, domain.LocalNodeID, old+int64(i))
+		tx.ExecContext(ctx, `INSERT INTO node_telemetry (node_id, sampled_at_ms, cpu_percent, logical_cpus, memory_used_bytes, memory_total_bytes, disk_used_bytes, disk_total_bytes, running_bots) VALUES (?,?,1,1,1,2,1,2,0)`, domain.LocalNodeID, old+int64(i))
 	}
 	for i := 0; i < 10; i++ {
-		tx.ExecContext(ctx, `INSERT INTO node_telemetry VALUES (?,?,1,1,1,2,1,2,0)`, domain.LocalNodeID, fresh+int64(i))
+		tx.ExecContext(ctx, `INSERT INTO node_telemetry (node_id, sampled_at_ms, cpu_percent, logical_cpus, memory_used_bytes, memory_total_bytes, disk_used_bytes, disk_total_bytes, running_bots) VALUES (?,?,1,1,1,2,1,2,0)`, domain.LocalNodeID, fresh+int64(i))
 	}
 	tx.Commit()
 
@@ -202,7 +202,7 @@ func TestPruneStopsWhenContextCancelled(t *testing.T) {
 	old := s.Now().Add(-9 * 24 * time.Hour).UnixMilli()
 	tx, _ := db.BeginTx(ctx, nil)
 	for i := 0; i < 300; i++ {
-		tx.ExecContext(ctx, `INSERT INTO node_telemetry VALUES (?,?,1,1,1,2,1,2,0)`, domain.LocalNodeID, old+int64(i))
+		tx.ExecContext(ctx, `INSERT INTO node_telemetry (node_id, sampled_at_ms, cpu_percent, logical_cpus, memory_used_bytes, memory_total_bytes, disk_used_bytes, disk_total_bytes, running_bots) VALUES (?,?,1,1,1,2,1,2,0)`, domain.LocalNodeID, old+int64(i))
 	}
 	tx.Commit()
 	s.Batch = 100

@@ -14,6 +14,8 @@
 //	botpanel reseal                re-encrypt every sealed value with the active key
 //	                               (panel stopped; resumable)
 //	botpanel doctor                read-only health checks (Docker, disk, keys, ...)
+//	botpanel env [reset [NAME]]    show, or drop, the environment overrides saved
+//	                               from the administration page (recovery path)
 //	botpanel version               print the build version
 package main
 
@@ -31,6 +33,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sync/atomic"
 	"syscall"
 	"time"
 	_ "time/tzdata" // schedules need time zones on hosts without a zoneinfo database
@@ -49,6 +52,8 @@ import (
 	"botpanel/internal/events"
 	"botpanel/internal/filesystem"
 	"botpanel/internal/github"
+	"botpanel/internal/hostmon"
+	"botpanel/internal/logbuf"
 	"botpanel/internal/migrations"
 	"botpanel/internal/oauth"
 	"botpanel/internal/oplog"
@@ -64,8 +69,17 @@ import (
 	rtdefaults "botpanel/runtimes"
 )
 
+// restartRequested is set when an administrator restarts the panel from the
+// browser; main then exits with restartExitCode so the supervisor starts it
+// again (a clean exit would be treated as a deliberate stop by systemd's
+// Restart=on-failure).
+var restartRequested atomic.Bool
+
+const restartExitCode = 75 // EX_TEMPFAIL
+
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	logs := logbuf.New(logbuf.DefaultCapacity)
+	log := slog.New(logs.Handler(slog.NewJSONHandler(os.Stderr, nil)))
 	var err error
 	switch {
 	case len(os.Args) >= 2 && os.Args[1] == "create-admin":
@@ -90,14 +104,20 @@ func main() {
 		fmt.Println("botpanel", version)
 	case len(os.Args) >= 2 && os.Args[1] == "doctor":
 		err = doctorCmd()
+	case len(os.Args) >= 2 && os.Args[1] == "env":
+		err = envCmd(os.Args[2:])
 	case len(os.Args) == 1:
-		err = serve(log)
+		err = serve(log, logs)
 	default:
 		err = fmt.Errorf("unknown command %q (see the package comment for usage)", os.Args[1])
 	}
 	if err != nil {
 		log.Error("fatal", "err", err)
 		os.Exit(1)
+	}
+	if restartRequested.Load() {
+		log.Info("exiting so the supervisor restarts the panel", "code", restartExitCode)
+		os.Exit(restartExitCode)
 	}
 }
 
@@ -391,7 +411,7 @@ func loadCatalog(cfg config.Config) (*runtimes.Catalog, error) {
 	return runtimes.Load(fsys)
 }
 
-func serve(log *slog.Logger) error {
+func serve(log *slog.Logger, logs *logbuf.Buffer) error {
 	// A soft ceiling makes the collector work harder near the footprint target.
 	// It is not a hard cap (stacks, cgo-free runtime overhead and mapped files
 	// are outside it); an explicit GOMEMLIMIT always wins.
@@ -426,6 +446,11 @@ func serve(log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("encryption keys: %w", err)
 	}
+	// Everything above is read from the environment alone (database, keys); the
+	// settings an administrator saved on the Environment page apply from here on.
+	envSvc := &service.PanelEnvService{Store: db, Keys: keys, Base: processEnv, Log: log,
+		CanRestart: supervised(), Restart: func() { restartRequested.Store(true); stop() }}
+	cfg = effectiveConfig(startCtx, cfg, envSvc, log)
 	catalog, err := loadCatalog(cfg)
 	if err != nil {
 		return fmt.Errorf("runtime catalog: %w", err)
@@ -648,13 +673,22 @@ func serve(log *slog.Logger) error {
 	if dk != nil {
 		aiLogs = dk
 	}
+	monitor := &hostmon.Monitor{Proc: telemetry.ProcReader{}, Store: db, Users: db, Runner: runnerStatus, Logs: logs, Version: version,
+		Started: started, DBPath: cfg.DBPath, DataRoot: cfg.DataRoot, BackupDir: cfg.BackupDir, NodeBudget: cfg.NodeMemoryBytes,
+		WorkspaceUsage: wsm.Usage}
+	if cfg.SitesListen != "" {
+		monitor.SitesDir = cfg.SitesDir
+	}
+	if dk != nil {
+		monitor.Stats, monitor.Containers = dk, dk
+	}
 	aiSvc := &service.AIService{Store: db, Keys: keys, Bots: botSvc, Sites: sitesSvc, Files: wsm, Ops: ops, Audit: audit, Diagnostic: aiDiagnostic, Logs: aiLogs, Log: log}
 	aiSvc.Start(ctx)
 	app := api.New(api.Deps{Diagnostics: diagnostics, Log: log, Deploy: deploySvc, Backups: backupSvc, Stats: statsSrc, SFTP: sftpInfo, Analytics: analytics, PublicURL: cfg.PublicURL, DB: db, UI: webui.FS(), Auth: authSvc, Bots: botSvc, OAuth: oauthSvc,
 		Catalog: catalog, SecureCookies: cfg.Production, ProxyHeader: cfg.ProxyHeader, MetricsToken: cfg.MetricsToken, Checks: checks, Nodes: db, Files: wsm, MaxUpload: cfg.MaxUploadBytes,
 		Console: consoleSvc, BaseCtx: ctx, RunnerReady: runnerReady, Ops: ops, Audit: audit, Schedules: scheduler,
 		MFA: &service.MFAService{Store: db, Keys: keys, Auth: authSvc}, Tokens: &service.TokenService{Store: db, Bots: botSvc}, Health: health,
-		Settings: settingsSvc, Sites: sitesSvc, AI: aiSvc, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
+		Settings: settingsSvc, Sites: sitesSvc, AI: aiSvc, Env: envSvc, Host: monitor, Logs: logs, SetupCodeFile: setupCodeFile, OnSetupDone: func() { _ = os.Remove(setupCodeFile) }})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err

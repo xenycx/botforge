@@ -103,6 +103,13 @@ export type Sample = {
 	disk_used_bytes: number;
 	disk_total_bytes: number;
 	running_bots: number;
+	load1: number;
+	swap_used_bytes: number;
+	swap_total_bytes: number;
+	net_rx_bps: number;
+	net_tx_bps: number;
+	disk_read_bps: number;
+	disk_write_bps: number;
 };
 export type NodeInfo = { id: string; name: string; transport: string; enabled: boolean; latest?: Sample };
 

@@ -1,7 +1,7 @@
 # BotForge documentation
 
 BotForge is a single-host Discord bot panel packaged as one Go binary with an
-embedded web interface. The current project version is **0.3.0**. Start with
+embedded web interface. The current project version is **0.4.0**. Start with
 the guides below.
 
 ## Install and operate

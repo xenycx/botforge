@@ -59,6 +59,8 @@ export const actionText: Record<string, string> = {
 	'admin.user_create': 'added a user',
 	'admin.user_update': 'changed a user',
 	'admin.site_update': 'suspended or restored a site',
+	'admin.environment': 'changed panel environment settings',
+	'admin.restart': 'restarted the panel',
 	'bot.move': 'moved the bot to another workspace',
 	'deploy.publish': 'published it to a new GitHub repository',
 	'deploy.push': 'pushed its files to GitHub',

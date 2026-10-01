@@ -109,6 +109,10 @@ provider. Live event streams of finished runs are dropped after five minutes.
 The first provider and its API key can be entered in the optional **AI
 operator** step of the `/setup` wizard. Administration → Panel settings stores
 multiple providers and can add, edit, enable/disable, delete and re-key them.
+The form starts from a preset (DeepSeek, OpenAI, OpenRouter or a custom
+endpoint), marks required fields, and folds tuning, pricing and paths under an
+**Optional** heading; every optional field carries an *Optional* tag. Web
+research is optional as a whole.
 Profiles include the base URL, chat/models paths, model, context/output limits,
 temperature, timeouts and optional token prices (USD per million tokens). **Test capabilities** sends no project data
 and verifies authentication, SSE streaming, usage and a harmless tool call.

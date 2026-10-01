@@ -64,7 +64,7 @@ func TestMigrateIdempotentAndSchema(t *testing.T) {
 	}
 	var versions int
 	db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions)
-	if versions != 30 {
+	if versions != 32 {
 		t.Fatalf("versions = %d", versions)
 	}
 	var tables int

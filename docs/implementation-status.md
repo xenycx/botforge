@@ -1,10 +1,36 @@
 # Platform overhaul implementation status
 
-Updated 2026-10-01 for BotForge 0.3.0 (see `CHANGELOG.md`). This is the durable checklist for the requested platform
+Updated 2026-10-01 for BotForge 0.4.0 (see `CHANGELOG.md`). This is the durable checklist for the requested platform
 overhaul. A checked item is implemented in the current working tree; partial
 items state exactly what remains.
 
-## Completed in 0.3.0 and since 0.2.0
+## Completed in 0.4.0, 0.3.0 and since 0.2.0
+
+- [x] Host monitoring and panel logs (0.4.0): richer host samples (load,
+  swap, network, disk throughput) with bucketed 1 h to 30 d history, a live
+  host/process/Docker/storage snapshot, per-bot resource use, an in-memory
+  panel log viewer with redaction, and an attention list. Enforcement:
+  read-only, administrator-only, application level. Limits: the log buffer
+  holds the newest 2,000 lines and is empty after a restart (full history stays
+  in journald/Docker); directory sizes are counted in the background every five
+  minutes and bounded (20 s, 3 M files); per-bot live numbers measure at most
+  60 running bots per refresh; network and disk throughput are host totals over
+  physical interfaces and whole block devices only.
+- [x] Environment variables editable from the panel (0.4.0). Overrides are
+  stored in the database (secrets sealed) and layered over the process
+  environment at start; they apply after a restart and never write the
+  environment file. Enforcement: application level. Variables read before the
+  database opens, paths the command-line tools share, the Docker endpoint,
+  container user, root-container switch, container network and proxy header
+  stay environment-file-only; sign-in providers stay on Panel settings. A saved
+  set that no longer validates is ignored at start. "Restart panel" exits with
+  code 75 and relies on systemd or a container restart policy, which BotForge
+  cannot verify.
+- [x] Go to palette indexes pages, administration sections, environment
+  variables, docs, bots (with sections), sites, people, AI chats and actions
+  (0.4.0). Client-side only; results follow what the API returns to the
+  signed-in account.
+- [x] AI settings layout and optional-field markers (0.4.0).
 
 - [x] Team workspaces with owner/admin/developer/viewer roles, a personal
   workspace per account, moving bots between workspaces, and a sidebar
@@ -71,7 +97,7 @@ items state exactly what remains.
   Docker-runtime-level.
 
 Migrations added since 0.2.0 (the schema-version assertion in
-`internal/store/sqlite/db_test.go` is 30):
+`internal/store/sqlite/db_test.go` is 32):
 
 | Migration | Purpose |
 | --- | --- |
@@ -81,6 +107,8 @@ Migrations added since 0.2.0 (the schema-version assertion in
 | `0027_bot_sites.sql` | One-to-one bot/site links, generated-page presentation, custom HTML/CSS and public-widget opt-in |
 | `0028_ai_operator.sql` | Encrypted provider profiles, target chats, runs, tools, change/undo snapshots and site-aware audit identity |
 | `0029_ai_tool_call_ids.sql` | `ai_tool_calls.provider_call_id`; rows are keyed by panel UUIDs (existing rows keep their id) |
+| `0031_env_overrides.sql` | Environment overrides saved from the administration page (secrets sealed under namespace `env`; included in `verify`, `reseal` and `WalkSealed`) |
+| `0032_host_telemetry.sql` | `node_telemetry` gains `load1`, swap, network and disk throughput columns (existing rows read as zero) |
 | `0030_ai_global_chat.sql` | Rebuilds `ai_conversations` so a chat may have no target; `ai_runs.bot_id`/`site_id`, `ai_messages.context_json` (the conversation subtree is stashed and restored, rows preserved) |
 
 Known gaps in this work:

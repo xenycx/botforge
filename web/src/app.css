@@ -377,6 +377,19 @@
 	.help {
 		@apply mt-1 block text-small text-muted;
 	}
+	/* Field markers: nothing for a required field beyond its asterisk, a quiet
+	   "Optional" tag for the rest, so what can be skipped is visible at a glance. */
+	.req {
+		@apply ml-0.5 text-fail;
+	}
+	.opt {
+		@apply ml-2 rounded-pill border border-rule-soft px-1.5 align-middle font-mono text-muted;
+		font-size: 0.625rem;
+		line-height: 1rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
 	.surface {
 		@apply border border-rule-soft bg-panel;
 	}

@@ -155,7 +155,8 @@ func (db *DB) WalkSealed(ctx context.Context, fn func(SealedRow) error) error {
 		UNION ALL SELECT 'github:' || bot_id, 'webhook', webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_nonce
 			FROM github_repos
 		UNION ALL SELECT 'mfa:' || user_id, 'totp', secret_key_id, secret_cipher, secret_nonce FROM user_mfa
-		UNION ALL SELECT 'settings', key, secret_key_id, secret_cipher, secret_nonce FROM panel_settings WHERE secret_cipher IS NOT NULL`)
+		UNION ALL SELECT 'settings', key, secret_key_id, secret_cipher, secret_nonce FROM panel_settings WHERE secret_cipher IS NOT NULL
+		UNION ALL SELECT 'env', name, secret_key_id, secret_cipher, secret_nonce FROM env_overrides WHERE secret_cipher IS NOT NULL`)
 	if err != nil {
 		return err
 	}

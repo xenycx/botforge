@@ -144,6 +144,28 @@ func (c Config) OAuthConfigured(provider string) bool {
 // system directories; set BOTPANEL_ENV=development to default to ./.dev-data
 // so nothing requires writes outside the working tree.
 func Load(getenv func(string) string) (Config, error) {
+	return LoadLookup(func(name string) (string, bool) {
+		if v := strings.TrimSpace(getenv(name)); v != "" {
+			return v, true
+		}
+		// An explicitly empty variable can disable a development default; the
+		// getenv function cannot tell it from an unset one, so ask the process.
+		if v, ok := os.LookupEnv(name); ok && strings.TrimSpace(v) == "" && getenv(name) == v {
+			return "", true
+		}
+		return "", false
+	})
+}
+
+// Lookup reads one variable and reports whether it is set. A variable that is
+// set to the empty string is "set": it can switch a feature off even though a
+// default or a lower layer would turn it on.
+type Lookup func(name string) (value string, set bool)
+
+// LoadLookup is Load over a Lookup, so the configuration can be built from
+// layered sources (the process environment plus overrides stored by the panel).
+func LoadLookup(look Lookup) (Config, error) {
+	getenv := func(name string) string { v, _ := look(name); return v }
 	env := strings.ToLower(strings.TrimSpace(getenv("BOTPANEL_ENV")))
 	switch env {
 	case "", "production", "development":
@@ -312,7 +334,7 @@ func Load(getenv func(string) string) (Config, error) {
 		c.SitesDir = filepath.Join(".dev-data", "sites")
 		c.SitesListen, c.SitesBaseURL = "127.0.0.1:8081", "http://localhost:8081"
 	}
-	if v, ok := lookup(getenv, "BOTPANEL_SITES_LISTEN"); ok {
+	if v, ok := look("BOTPANEL_SITES_LISTEN"); ok {
 		c.SitesListen = v
 	}
 	if v := strings.TrimRight(strings.TrimSpace(getenv("BOTPANEL_SITES_BASE_URL")), "/"); v != "" {
@@ -391,19 +413,6 @@ func Load(getenv func(string) string) (Config, error) {
 		c.ShutdownTimeout = d
 	}
 	return c, c.Validate()
-}
-
-// lookup distinguishes an explicitly empty variable (which may disable a
-// development default) from an unset one. getenv cannot, so the process
-// environment is consulted when getenv is os.Getenv's value.
-func lookup(getenv func(string) string, name string) (string, bool) {
-	if v := strings.TrimSpace(getenv(name)); v != "" {
-		return v, true
-	}
-	if v, ok := os.LookupEnv(name); ok && strings.TrimSpace(v) == "" && getenv(name) == v {
-		return "", true
-	}
-	return "", false
 }
 
 // LoadEnv loads configuration from the process environment.

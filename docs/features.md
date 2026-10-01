@@ -18,7 +18,10 @@ These are per-browser preferences.
 - **Fleet** (`/`): search, filters for state, runtime and owner, tags and
   favourites (all kept in the URL), a summary of running / needs attention /
   in progress / stopped bots, batch Start, Stop or Restart of up to 50 bots
-  with a review step and a result per bot, and a Ctrl+K switcher.
+  with a review step and a result per bot, and a Ctrl+K "Go to" palette that
+  finds pages, administration sections, environment variables, docs, bots (and
+  their sections), sites, people, AI chats and actions. Several words narrow
+  the search; Tab switches scope; `>` lists actions only.
 - **New bot** (`/bots/new`): template, GitHub repository or empty bot; required
   values such as the token up front; review of memory, CPU and build memory.
 - **Bot page**: an identity card with shortcuts to the public page studio and
@@ -44,7 +47,9 @@ These are per-browser preferences.
   screens and above them on narrow ones.
 - **Administration**: users (with each account's workspaces, bots and recent
   deployments), workspaces, sites and domains (suspend/restore), host
-  resources and capacity, panel settings, diagnostics.
+  resources, bots' resource use, capacity and panel logs, panel settings
+  (sign-in, registration, the AI assistant), the environment editor, and
+  diagnostics.
 
 ## Sharing and permissions (RBAC)
 
@@ -269,9 +274,58 @@ running bot stops reporting for 1 minute to 1 hour (and once when it recovers).
 A test message can be sent. Crash alerts are throttled to one per bot per 10
 minutes.
 
+## Host monitoring and panel logs
+
+**Administration → Host** has four tabs.
+
+- **Resources**: CPU, memory (cache, swap), load average, disk, network and disk
+  throughput now and over 1 hour to 30 days (averages plus dashed peaks; the
+  range is capped by `BOTPANEL_TELEMETRY_RETENTION`, 7 days by default), a
+  disk-fill forecast from the trend, host facts, the BotForge process (memory,
+  goroutines, open files, requests, errors, database size), the Docker runner
+  and storage per location (directory sizes are counted in the background
+  about every five minutes). A "needs attention" list flags a nearly full disk,
+  memory or swap pressure, a high load, a Docker problem and recent errors.
+- **Bots**: every bot's CPU (cores against its limit), memory against its
+  limit, network totals since the container started, processes and workspace
+  size; sortable, refreshed every 10 seconds, at most 60 running bots measured
+  per refresh.
+- **Capacity**: the admission budgets below, with each limit's current value
+  and source.
+- **Panel logs**: the newest 2,000 lines the panel logged since it started,
+  with level filter, search, live follow, copy and download. Secrets, tokens and
+  passwords are redacted before a line is kept. The view starts empty after a
+  restart; the complete log stays in journald (`journalctl -u botpanel`) or
+  `docker logs`.
+
+## Environment variables from the panel
+
+**Administration → Environment** lists every `BOTPANEL_` variable with its
+description, default and source (default, environment file or set here) and
+lets an administrator change most of them. Values are stored in the panel's
+database (the metrics token encrypted) and layered over the process environment
+when BotForge starts, so a change applies after a restart; the page shows what
+is waiting. The environment file is never edited. Precedence: value set here,
+then environment, then the built-in default; a value set here may be empty to
+switch off something the environment enables.
+
+Not editable here: variables read before the database opens (`BOTPANEL_ENV`,
+`_LISTEN`, `_DB_PATH`, `_DB_MAX_CONNS`, `_DATA_ROOT`, `_KEY_DIR`,
+`_ACTIVE_KEY_ID`, `_RUNTIMES_DIR`), ones that decide what the panel may do to
+the host (`_DOCKER_HOST`, `_CONTAINER_USER`, `_WORKSPACE_OWNER`,
+`_ALLOW_ROOT_CONTAINER_USER`, `_CONTAINER_NETWORK`, `_PROXY_HEADER`), and the
+sign-in and address variables, which Panel settings owns. Every save is checked
+as a whole configuration first; if a saved set ever stops validating, the panel
+starts without it and says so on the page. **Restart panel** exits with code 75
+and needs systemd (`Restart=on-failure`) or a container restart policy; without
+a detected supervisor the button is hidden. Bot containers keep running through
+a restart. From the host: `botpanel env` lists the saved values and `botpanel
+env reset [NAME…]` drops them.
+
 ## Capacity and admission
 
-Administrators can set budgets in the environment file (0 = unlimited):
+Administrators can set budgets in the environment file or on the Environment
+page (0 = unlimited):
 
 | Setting | Effect |
 | --- | --- |

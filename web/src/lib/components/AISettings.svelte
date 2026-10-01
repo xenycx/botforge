@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { api, ApiError } from '$lib/api/client';
 	import { confirmDialog } from '$lib/ui/dialogs.svelte';
 	import { toast } from '$lib/ui/toast.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import Switch from '$lib/components/ui/Switch.svelte';
 
 	type P = {
 		id: string; name: string; enabled: boolean; default: boolean; base_url: string; chat_path: string; models_path: string;
@@ -123,95 +124,190 @@
 		} catch (e) { searchError = msg(e); } finally { busy = ''; }
 	}
 	onMount(load);
+
+	// Starting points for the connection fields; everything stays editable.
+	const presets = [
+		{ id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com', model: 'deepseek-chat' },
+		{ id: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+		{ id: 'openrouter', name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+		{ id: 'custom', name: '', base_url: '', model: '' }
+	];
+	let presetId = $state('');
+	function applyPreset(id: string) {
+		const p = presets.find((x) => x.id === id);
+		if (!p) return;
+		presetId = id;
+		form.name = p.name || form.name;
+		form.base_url = p.base_url;
+		form.default_model = p.model;
+	}
+	const defaults = preset();
+	let showTuning = $state(false);
+	// How many optional settings differ from their defaults, shown on the closed section.
+	const tuned = $derived(
+		[
+			form.chat_path !== defaults.chat_path, form.models_path !== defaults.models_path, form.context_size !== null && (form.context_size as unknown) !== '',
+			Number(form.max_output_tokens) !== defaults.max_output_tokens, Number(form.temperature) !== defaults.temperature, Number(form.timeout_s) !== defaults.timeout_s,
+			form.input_price !== null && (form.input_price as unknown) !== '', form.output_price !== null && (form.output_price as unknown) !== ''
+		].filter(Boolean).length
+	);
+	// Open the optional section only when editing a provider that already uses it;
+	// untrack so typing in it does not collapse it again.
+	$effect(() => {
+		const id = editing;
+		if (id !== null) showTuning = id !== '' && untrack(() => tuned) > 0;
+	});
+	const defaultProvider = $derived(providers.find((p) => p.default && p.enabled) ?? providers.find((p) => p.enabled));
+	const ready = $derived(!!defaultProvider?.key_set);
 </script>
 
-<section class="card p-5 sm:p-6">
-	<div class="flex flex-wrap items-start gap-3">
-		<div class="min-w-0 flex-1">
-			<h3 class="text-title font-semibold">AI operator providers</h3>
-			<p class="mt-1 text-small text-muted">OpenAI-compatible endpoints only. Keys are encrypted and browsers receive only a key-set marker.</p>
+<div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+	<!-- Providers -->
+	<section id="ai-providers" class="card min-w-0 p-5 sm:p-6" aria-labelledby="ai-prov-h">
+		<div class="flex flex-wrap items-start gap-3">
+			<div class="min-w-0 flex-1">
+				<h3 id="ai-prov-h" class="flex flex-wrap items-center gap-2 text-title font-semibold">Providers
+					{#if editing === null}<span class="pill" data-tone={ready ? 'run' : 'warn'}>{ready ? 'Assistant ready' : providers.length ? 'No usable provider' : 'Not set up'}</span>{/if}
+				</h3>
+				<p class="mt-1 text-small text-muted">Any OpenAI-compatible endpoint. Keys are encrypted and never shown again.</p>
+			</div>
+			{#if editing === null}<button type="button" class="btn btn-sm" onclick={startNew}><Icon name="plus" size={12} />Add provider</button>{/if}
 		</div>
-		{#if editing === null}<button type="button" class="btn btn-sm" onclick={startNew}><Icon name="plus" size={12} />Add provider</button>{/if}
-	</div>
-	{#if error}<p class="mt-3 text-small text-fail" role="alert">{error}</p>{/if}
+		{#if error}<p class="mt-3 text-small text-fail" role="alert">{error}</p>{/if}
 
-	<div class="mt-4 space-y-2">
-		{#each providers as p (p.id)}
-			<div class="flex flex-wrap items-center gap-2 rounded-control border border-rule-soft p-3 {editing === p.id ? 'border-action/40 bg-action/5' : ''}">
-				<strong>{p.name}</strong>
-				<span class="pill" data-tone={p.enabled ? 'run' : undefined}>{p.enabled ? 'Enabled' : 'Disabled'}</span>
-				{#if p.default}<span class="pill">Default</span>{/if}
-				<span class="min-w-0 flex-1 truncate text-small text-muted">{p.default_model} · key {p.key_set ? 'set' : 'missing'}</span>
-				<div class="flex flex-wrap gap-1.5">
-					<button type="button" class="btn btn-sm" disabled={!!busy || !p.key_set} onclick={() => test(p)}>Test</button>
-					<button type="button" class="btn btn-sm" disabled={!!busy} onclick={() => startEdit(p)}>Edit</button>
-					<button type="button" class="btn btn-sm" disabled={!!busy} onclick={() => setEnabled(p, !p.enabled)}>{p.enabled ? 'Disable' : 'Enable'}</button>
-					<button type="button" class="btn btn-sm btn-quiet text-fail" disabled={!!busy} onclick={() => remove(p)} aria-label="Delete {p.name}"><Icon name="trash" size={12} /></button>
-				</div>
-			</div>
+		{#if editing === null}
+			<ul class="mt-4 grid gap-2">
+				{#each providers as p (p.id)}
+					<li class="rounded-control border border-rule-soft p-3 {p.enabled ? '' : 'opacity-75'}">
+						<div class="flex flex-wrap items-center gap-2">
+							<strong>{p.name}</strong>
+							<span class="pill" data-tone={p.enabled ? 'run' : undefined}>{p.enabled ? 'Enabled' : 'Disabled'}</span>
+							{#if p.default}<span class="pill" data-tone="warn">Default</span>{/if}
+							{#if !p.key_set}<span class="pill" data-tone="fail">Key missing</span>{/if}
+						</div>
+						<p class="mt-1 truncate font-mono text-[12px] text-muted" title={p.base_url}>{p.default_model} · {p.base_url.replace(/^https?:\/\//, '')}</p>
+						<div class="mt-2 flex flex-wrap gap-1.5">
+							<button type="button" class="btn btn-sm" disabled={!!busy || !p.key_set} onclick={() => test(p)}>{busy === p.id ? 'Working…' : 'Test'}</button>
+							<button type="button" class="btn btn-sm" disabled={!!busy} onclick={() => startEdit(p)}><Icon name="pencil" size={12} />Edit</button>
+							<button type="button" class="btn btn-sm" disabled={!!busy} onclick={() => setEnabled(p, !p.enabled)}>{p.enabled ? 'Disable' : 'Enable'}</button>
+							<button type="button" class="btn btn-sm btn-quiet ml-auto text-fail" disabled={!!busy} onclick={() => remove(p)} aria-label="Delete {p.name}"><Icon name="trash" size={12} /></button>
+						</div>
+					</li>
+				{:else}
+					<li class="rounded-control border border-dashed border-rule p-4 text-small text-muted">
+						<p class="font-medium text-ink">No provider yet</p>
+						<p class="mt-0.5">The assistant stays unavailable until one is added. Hosting bots works either way.</p>
+						<button type="button" class="btn btn-sm btn-primary mt-3" onclick={startNew}><Icon name="plus" size={12} />Add the first provider</button>
+					</li>
+				{/each}
+			</ul>
 		{:else}
-			{#if editing === null}<p class="rounded-control border border-dashed border-rule p-4 text-small text-muted">No provider yet. The AI operator stays unavailable until one is added; hosting works either way.</p>{/if}
-		{/each}
-	</div>
-
-	{#if editing !== null}
-		<form class="mt-4 grid gap-3 border-t border-rule-soft pt-4 sm:grid-cols-2" onsubmit={save}>
-			<h4 class="font-semibold sm:col-span-2">{editing === '' ? 'New provider' : `Edit ${form.name}`}</h4>
-			<label><span class="label">Name</span><input class="field" required maxlength="80" bind:value={form.name} /></label>
-			<label><span class="label">Base API URL</span><input class="field font-mono" required bind:value={form.base_url} placeholder="https://api.deepseek.com" /></label>
-			<label><span class="label">Chat completions path</span><input class="field font-mono" required bind:value={form.chat_path} /></label>
-			<label><span class="label">Models path</span><input class="field font-mono" required bind:value={form.models_path} /></label>
-			<label class="sm:col-span-2">
-				<span class="label">Default model ID</span>
-				<div class="flex gap-2">
-					<input class="field min-w-0 flex-1 font-mono" required bind:value={form.default_model} list="ai-provider-models" />
-					{#if editing}<button type="button" class="btn" disabled={!!busy} onclick={discover}>{busy === 'models' ? 'Loading…' : 'Discover models'}</button>{/if}
+			<form class="mt-4 grid gap-5" onsubmit={save}>
+				<div class="flex items-center justify-between gap-2 border-b border-rule-soft pb-2">
+					<h4 class="font-semibold">{editing === '' ? 'New provider' : `Edit ${form.name}`}</h4>
+					<p class="text-small text-muted"><span class="req">*</span> required · the rest is <span class="opt !ml-0">Optional</span></p>
 				</div>
-				<datalist id="ai-provider-models">{#each models as m}<option value={m}></option>{/each}</datalist>
-				<span class="help">{editing ? 'Discovery uses the saved key and models path; you may also type any model ID.' : 'Save the provider first to discover models from its API.'}</span>
-			</label>
-			<label><span class="label">Context size (tokens)</span><input class="field" type="number" min="1024" max="2000000" bind:value={form.context_size} placeholder="Provider default" /></label>
-			<label><span class="label">Max output tokens</span><input class="field" type="number" min="64" max="131072" required bind:value={form.max_output_tokens} /></label>
-			<label><span class="label">Temperature</span><input class="field" type="number" min="0" max="2" step="0.05" required bind:value={form.temperature} /></label>
-			<label><span class="label">Timeout (seconds)</span><input class="field" type="number" min="5" max="600" required bind:value={form.timeout_s} /></label>
-			<label><span class="label">Input price (USD per 1M tokens)</span><input class="field" type="number" min="0" step="0.0001" bind:value={form.input_price} placeholder="Optional" /></label>
-			<label><span class="label">Output price (USD per 1M tokens)</span><input class="field" type="number" min="0" step="0.0001" bind:value={form.output_price} placeholder="Optional" /></label>
-			<label class="sm:col-span-2">
-				<span class="label">{editing === '' ? 'API key' : 'Replace API key'}</span>
-				<input class="field" type="password" bind:value={key} autocomplete="new-password" required={editing === ''} placeholder={editing === '' ? 'Bearer key' : 'Leave blank to keep the current key'} />
-				<span class="help">Sealed with the panel keyring; it is never shown again.</span>
-			</label>
-			<label class="flex items-center gap-2"><input type="checkbox" bind:checked={form.enabled} />Enabled</label>
-			<label class="flex items-center gap-2"><input type="checkbox" bind:checked={form.default} />Default for new conversations</label>
-			<div class="flex justify-end gap-2 sm:col-span-2">
-				<button type="button" class="btn" onclick={stopEdit}>Cancel</button>
-				<button class="btn btn-primary" disabled={busy === 'save'}>{busy === 'save' ? 'Saving…' : editing === '' ? 'Add provider' : 'Save provider'}</button>
-			</div>
-		</form>
-	{/if}
-</section>
 
-{#if search}
-	<section class="card p-5 sm:p-6">
-		<h3 class="text-title font-semibold">Web research</h3>
-		<p class="mt-1 text-small text-muted">SearxNG/Risa-compatible search. The search origin may be a private, self-hosted address; fetched result pages must be public. Search credentials are sent only to this origin.</p>
-		<form class="mt-4 grid gap-3 sm:grid-cols-2" onsubmit={saveSearch}>
-			<label class="flex items-center gap-2"><input type="checkbox" bind:checked={search.search_enabled} />Enable search</label>
-			<label class="flex items-center gap-2"><input type="checkbox" bind:checked={search.fetch_enabled} />Enable public page fetching</label>
-			<label class="sm:col-span-2"><span class="label">Search base URL</span><input class="field font-mono" bind:value={search.base_url} /></label>
-			<label><span class="label">Results per query</span><input class="field" type="number" min="1" max="10" bind:value={search.results} /></label>
-			<label><span class="label">Safe search</span><select class="field" bind:value={search.safe_search}><option value={0}>Off</option><option value={1}>Moderate</option><option value={2}>Strict</option></select></label>
-			<label><span class="label">Language</span><input class="field" bind:value={search.language} placeholder="auto" /></label>
-			<label><span class="label">Time range</span><select class="field" bind:value={search.time_range}><option value="">Any</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
-			<label class="sm:col-span-2"><span class="label">Categories</span><input class="field" bind:value={search.categories} placeholder="general, it" /></label>
-			<label class="sm:col-span-2"><span class="label">Replace API keys (one per line)</span><textarea class="field min-h-20 font-mono" bind:value={searchKeys} placeholder={search.key_count ? `${search.key_count} encrypted key(s) already set` : 'Optional'}></textarea></label>
-			{#if searchError}<p class="text-small text-fail sm:col-span-2" role="alert">{searchError}</p>{/if}
-			{#if searchResult}<p class="text-small text-muted sm:col-span-2" role="status">{searchResult}</p>{/if}
-			{#if searchDirty}<p class="text-small text-muted sm:col-span-2">Unsaved changes. Save them before testing; the test uses the saved settings.</p>{/if}
-			<div class="flex justify-end gap-2 sm:col-span-2">
-				<button type="button" class="btn" disabled={!!busy || searchDirty || !search.search_enabled} onclick={testSearch} title="Tests the saved settings">{busy === 'search-test' ? 'Testing…' : 'Test search'}</button>
-				<button class="btn btn-primary" disabled={busy === 'search'}>Save research settings</button>
-			</div>
-		</form>
+				{#if editing === ''}
+					<div>
+						<span class="label">Start from</span>
+						<div class="flex flex-wrap gap-1.5" role="group" aria-label="Provider presets">
+							{#each presets as p (p.id)}
+								<button type="button" class="rounded-pill border px-3 py-1 text-small {presetId === p.id ? 'border-action bg-action/10 font-medium' : 'border-rule-soft text-muted hover:text-ink'}" aria-pressed={presetId === p.id} onclick={() => applyPreset(p.id)}>{p.id === 'custom' ? 'Custom endpoint' : p.name}</button>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<fieldset class="grid gap-3 sm:grid-cols-2">
+					<legend class="eyebrow mb-2">Connection</legend>
+					<label><span class="label">Name<span class="req" aria-hidden="true">*</span></span><input class="field" required maxlength="80" bind:value={form.name} placeholder="DeepSeek" /></label>
+					<label><span class="label">Base API URL<span class="req" aria-hidden="true">*</span></span><input class="field font-mono" required bind:value={form.base_url} placeholder="https://api.deepseek.com" /></label>
+					<label class="sm:col-span-2">
+						<span class="label">API key{#if editing === ''}<span class="req" aria-hidden="true">*</span>{:else}<span class="opt">Optional · replace</span>{/if}</span>
+						<input class="field font-mono" type="password" bind:value={key} autocomplete="new-password" required={editing === ''} placeholder={editing === '' ? 'Paste the key' : 'Leave blank to keep the current key'} />
+						<span class="help">Sealed with the panel keyring; it is never shown again.</span>
+					</label>
+					<label class="sm:col-span-2">
+						<span class="label">Default model<span class="req" aria-hidden="true">*</span></span>
+						<div class="flex gap-2">
+							<input class="field min-w-0 flex-1 font-mono" required bind:value={form.default_model} list="ai-provider-models" placeholder="deepseek-chat" />
+							{#if editing}<button type="button" class="btn" disabled={!!busy} onclick={discover}>{busy === 'models' ? 'Loading…' : 'Discover models'}</button>{/if}
+						</div>
+						<datalist id="ai-provider-models">{#each models as m}<option value={m}></option>{/each}</datalist>
+						<span class="help">{editing ? 'Discovery uses the saved key; you may also type any model ID.' : 'Save the provider first to discover models from its API.'}</span>
+					</label>
+				</fieldset>
+
+				<div class="rounded-control border border-rule-soft">
+					<button type="button" class="flex w-full items-center gap-2 px-3 py-2.5 text-left" aria-expanded={showTuning} onclick={() => (showTuning = !showTuning)}>
+						<Icon name={showTuning ? 'chevronDown' : 'chevronRight'} size={14} class="text-muted" />
+						<span class="font-medium">Tuning and pricing</span><span class="opt !ml-0">Optional</span>
+						<span class="ml-auto text-small text-muted">{tuned ? `${tuned} changed from the defaults` : 'Defaults are fine for most providers'}</span>
+					</button>
+					{#if showTuning}
+						<div class="grid gap-3 border-t border-rule-soft p-3 sm:grid-cols-2">
+							<label><span class="label">Max output tokens<span class="opt">Optional</span></span><input class="field" type="number" min="64" max="131072" required bind:value={form.max_output_tokens} /><span class="help">Default {defaults.max_output_tokens}.</span></label>
+							<label><span class="label">Temperature<span class="opt">Optional</span></span><input class="field" type="number" min="0" max="2" step="0.05" required bind:value={form.temperature} /><span class="help">Default {defaults.temperature}. Lower is steadier.</span></label>
+							<label><span class="label">Timeout, seconds<span class="opt">Optional</span></span><input class="field" type="number" min="5" max="600" required bind:value={form.timeout_s} /><span class="help">Default {defaults.timeout_s}.</span></label>
+							<label><span class="label">Context size, tokens<span class="opt">Optional</span></span><input class="field" type="number" min="1024" max="2000000" bind:value={form.context_size} placeholder="Provider default" /></label>
+							<label><span class="label">Input price, USD per 1M tokens<span class="opt">Optional</span></span><input class="field" type="number" min="0" step="0.0001" bind:value={form.input_price} placeholder="Not tracked" /></label>
+							<label><span class="label">Output price, USD per 1M tokens<span class="opt">Optional</span></span><input class="field" type="number" min="0" step="0.0001" bind:value={form.output_price} placeholder="Not tracked" /></label>
+							<label><span class="label">Chat completions path<span class="opt">Optional</span></span><input class="field font-mono" required bind:value={form.chat_path} /></label>
+							<label><span class="label">Models path<span class="opt">Optional</span></span><input class="field font-mono" required bind:value={form.models_path} /></label>
+						</div>
+					{/if}
+				</div>
+
+				<div class="grid gap-3 sm:grid-cols-2">
+					<Switch bind:checked={form.enabled} label="Enabled">People can use this provider.</Switch>
+					<Switch bind:checked={form.default} label="Default provider">Used for new conversations.</Switch>
+				</div>
+				<div class="flex justify-end gap-2 border-t border-rule-soft pt-3">
+					<button type="button" class="btn" onclick={stopEdit}>Cancel</button>
+					<button class="btn btn-primary" disabled={busy === 'save'}>{busy === 'save' ? 'Saving…' : editing === '' ? 'Add provider' : 'Save provider'}</button>
+				</div>
+			</form>
+		{/if}
 	</section>
-{/if}
+
+	<!-- Web research -->
+	{#if search}
+		<section id="ai-research" class="card min-w-0 p-5 sm:p-6" aria-labelledby="ai-res-h">
+			<div class="flex flex-wrap items-center gap-2">
+				<h3 id="ai-res-h" class="text-title font-semibold">Web research</h3>
+				<span class="opt !ml-0">Optional</span>
+				<span class="pill ml-auto" data-tone={search.search_enabled ? 'run' : undefined}>{search.search_enabled ? 'On' : 'Off'}</span>
+			</div>
+			<p class="mt-1 text-small text-muted">Lets the assistant look things up while debugging. SearxNG or Risa compatible.</p>
+			<form class="mt-4 grid gap-4" onsubmit={saveSearch}>
+				<div class="grid gap-3">
+					<Switch bind:checked={search.search_enabled} label="Search the web">Send search queries to the address below.</Switch>
+					<Switch bind:checked={search.fetch_enabled} label="Read public pages">Fetch result pages. Private and local addresses are always refused.</Switch>
+				</div>
+				<fieldset class="grid gap-3 transition-opacity {search.search_enabled ? '' : 'pointer-events-none opacity-50'}" disabled={!search.search_enabled}>
+					<label>
+						<span class="label">Search base URL{#if search.search_enabled}<span class="req" aria-hidden="true">*</span>{/if}</span>
+						<input class="field font-mono" bind:value={search.base_url} required={search.search_enabled} placeholder="https://search.example.com" />
+						<span class="help">May be a private, self-hosted address. Credentials are sent only here.</span>
+					</label>
+					<div class="grid gap-3 sm:grid-cols-2">
+						<label><span class="label">Results per query<span class="opt">Optional</span></span><input class="field" type="number" min="1" max="10" bind:value={search.results} /></label>
+						<label><span class="label">Safe search<span class="opt">Optional</span></span><select class="field" bind:value={search.safe_search}><option value={0}>Off</option><option value={1}>Moderate</option><option value={2}>Strict</option></select></label>
+						<label><span class="label">Language<span class="opt">Optional</span></span><input class="field" bind:value={search.language} placeholder="auto" /></label>
+						<label><span class="label">Time range<span class="opt">Optional</span></span><select class="field" bind:value={search.time_range}><option value="">Any</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
+						<label class="sm:col-span-2"><span class="label">Categories<span class="opt">Optional</span></span><input class="field" bind:value={search.categories} placeholder="general, it" /></label>
+						<label class="sm:col-span-2"><span class="label">API keys<span class="opt">Optional</span></span><textarea class="field min-h-16 font-mono" bind:value={searchKeys} placeholder={search.key_count ? `${search.key_count} encrypted key(s) set. Paste new ones, one per line, to replace them` : 'Only if the service needs a key. One per line'}></textarea></label>
+					</div>
+				</fieldset>
+				{#if searchError}<p class="text-small text-fail" role="alert">{searchError}</p>{/if}
+				{#if searchResult}<p class="text-small text-run" role="status">{searchResult}</p>{/if}
+				{#if searchDirty}<p class="text-small text-muted">Unsaved changes. Save before testing; the test uses the saved settings.</p>{/if}
+				<div class="flex flex-wrap justify-end gap-2 border-t border-rule-soft pt-3">
+					<button type="button" class="btn" disabled={!!busy || searchDirty || !search.search_enabled} onclick={testSearch} title="Tests the saved settings">{busy === 'search-test' ? 'Testing…' : 'Test search'}</button>
+					<button class="btn btn-primary" disabled={busy === 'search' || !searchDirty}>{busy === 'search' ? 'Saving…' : 'Save'}</button>
+				</div>
+			</form>
+		</section>
+	{/if}
+</div>

@@ -276,7 +276,7 @@ await step('Ctrl+K jumps to a bot by name', async () => {
 	await page.goto('/activity');
 	await page.getByRole('heading', { name: 'Activity' }).waitFor();
 	await page.keyboard.press('Control+k');
-	await page.getByPlaceholder('Bot name, tag or page').fill('discord');
+	await page.getByPlaceholder(/Search bots, pages/).fill('discord');
 	await page.keyboard.press('Enter');
 	await page.waitForURL(new RegExp(`/bots/${botId}`));
 });
@@ -333,7 +333,7 @@ await step('tags filter the fleet and favorites come first', async () => {
 });
 
 // Visual review at three sizes and page-wide overflow checks.
-const pages = ['/', '/register', '/dashboard', '/bots/new', `/bots/${botId}?tab=overview`, `/bots/${botId}?tab=console`, `/bots/${botId}?tab=files`, `/bots/${botId}?tab=env`, `/bots/${botId}?tab=analytics`, `/bots/${botId}?tab=backups`, `/bots/${botId}?tab=deploy`, `/bots/${botId}?tab=schedules`, `/bots/${botId}?tab=alerts`, `/bots/${botId}?tab=users`, '/activity', '/sites', '/settings/profile', '/settings/appearance', '/settings/workspaces', '/settings/connected-accounts', '/settings/security', '/settings/sftp', '/admin/users', '/admin/workspaces', '/admin/sites', '/admin/settings', '/admin/host', '/admin/diagnostics'];
+const pages = ['/', '/register', '/dashboard', '/bots/new', `/bots/${botId}?tab=overview`, `/bots/${botId}?tab=console`, `/bots/${botId}?tab=files`, `/bots/${botId}?tab=env`, `/bots/${botId}?tab=analytics`, `/bots/${botId}?tab=backups`, `/bots/${botId}?tab=deploy`, `/bots/${botId}?tab=schedules`, `/bots/${botId}?tab=alerts`, `/bots/${botId}?tab=users`, '/activity', '/sites', '/settings/profile', '/settings/appearance', '/settings/workspaces', '/settings/connected-accounts', '/settings/security', '/settings/sftp', '/admin/users', '/admin/workspaces', '/admin/sites', '/admin/settings', '/admin/host', '/admin/host?tab=bots', '/admin/host?tab=logs', '/admin/environment', '/admin/diagnostics'];
 for (const [label, vp] of [['phone', { width: 375, height: 812 }], ['tablet', { width: 768, height: 1024 }], ['desktop', { width: 1440, height: 900 }]]) {
 	const p = await newPage(vp);
 	await signIn(p, 'admin@e2e.test', adminPw);
@@ -385,16 +385,16 @@ await step('AI research settings save (enable, key) and survive a reload', async
 	await p.goto('/admin/settings');
 	const research = p.locator('section', { has: p.getByRole('heading', { name: 'Web research' }) });
 	await research.waitFor();
-	await research.getByLabel('Enable search').check();
-	await research.getByLabel('Replace API keys (one per line)').fill('e2e-search-key');
+	await research.getByLabel('Search the web').check();
+	await research.getByLabel('API keys').fill('e2e-search-key');
 	expect(await research.getByRole('button', { name: 'Test search' }).isDisabled(), 'Test search runs against unsaved settings');
-	await research.getByRole('button', { name: 'Save research settings' }).click();
+	await research.getByRole('button', { name: 'Save', exact: true }).click();
 	await p.getByText('Research settings saved').waitFor();
 	expect((await research.getByRole('alert').count()) === 0, 'save showed an error');
 	await p.reload();
 	await research.waitFor();
-	expect(await research.getByLabel('Enable search').isChecked(), 'search is not enabled after a reload');
-	expect((await research.getByLabel('Replace API keys (one per line)').getAttribute('placeholder'))?.startsWith('1 encrypted key'), 'the key was not stored');
+	expect(await research.getByLabel('Search the web').isChecked(), 'search is not enabled after a reload');
+	expect((await research.getByLabel('API keys').getAttribute('placeholder'))?.startsWith('1 encrypted key'), 'the key was not stored');
 	expect(!(await research.getByRole('button', { name: 'Test search' }).isDisabled()), 'Test search stays disabled after saving');
 	await p.context().close();
 });

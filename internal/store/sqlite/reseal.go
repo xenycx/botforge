@@ -27,6 +27,7 @@ var sealedSources = []sealedSource{
 	{"github_repos", "bot_id", "'github:' || bot_id", "'webhook'", "webhook_secret_ciphertext", "webhook_secret_nonce", "webhook_secret_key_id"},
 	{"user_mfa", "user_id", "'mfa:' || user_id", "'totp'", "secret_cipher", "secret_nonce", "secret_key_id"},
 	{"panel_settings", "key", "'settings'", "key", "secret_cipher", "secret_nonce", "secret_key_id"},
+	{"env_overrides", "name", "'env'", "name", "secret_cipher", "secret_nonce", "secret_key_id"},
 }
 
 // Reseal re-encrypts every sealed value through fn, in bounded batches. Each

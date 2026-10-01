@@ -134,5 +134,11 @@ not enforced (Docker has no native cap).
   automatic repair (file changes, offline diagnostics and restarts under
   per-run limits, all audited), encrypted OpenAI-compatible providers
   configurable in `/setup` or Administration, cited web research, and staged
-  diffs with undo. It cannot change startup commands, deploy, publish sites or
+  diffs with undo.
+* Administrator tools: a Host page with live and historical CPU, memory, load,
+  disk and network charts, per-bot resource use, storage, Docker and process
+  details and the panel's own log; an Environment page that edits `BOTPANEL_`
+  variables from the browser (applied at the next restart); and a Ctrl+K "Go to"
+  palette that finds pages, settings, variables, bots, sites, people, chats and
+  actions. It cannot change startup commands, deploy, publish sites or
   push to GitHub.

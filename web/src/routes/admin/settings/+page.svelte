@@ -139,5 +139,10 @@
 
 		<div class="sticky bottom-4 flex justify-end xl:col-span-2"><button class="btn btn-primary shadow-overlay" disabled={saving}>{saving ? 'Saving…' : 'Save and apply'}</button></div>
 	</form>
-	<div class="mt-8 grid w-full min-w-0 max-w-3xl gap-6"><AISettings /></div>
+	<div class="mt-10 border-t border-rule-soft pt-8">
+		<p class="eyebrow">AI operator</p>
+		<h2 class="mt-1 text-section">AI assistant</h2>
+		<p class="mt-1 max-w-3xl text-muted">The assistant behind Ask AI. It needs one provider; web research is an optional extra. Nothing here affects hosting.</p>
+		<div class="mt-4"><AISettings /></div>
+	</div>
 {/if}

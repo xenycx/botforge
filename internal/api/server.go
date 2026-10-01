@@ -16,6 +16,8 @@ import (
 	"botpanel/internal/diag"
 	"botpanel/internal/domain"
 	"botpanel/internal/filesystem"
+	"botpanel/internal/hostmon"
+	"botpanel/internal/logbuf"
 	"botpanel/internal/pkgmgr"
 	"botpanel/internal/runtimes"
 	"botpanel/internal/service"
@@ -58,6 +60,9 @@ type Deps struct {
 	Settings      *service.SettingsService // nil disables the setup wizard and panel settings
 	Sites         *service.SiteService     // nil (or not started) disables static site hosting
 	AI            *service.AIService       // nil disables the AI operator
+	Env           *service.PanelEnvService // nil disables the environment editor
+	Host          *hostmon.Monitor         // nil disables the host monitoring routes
+	Logs          *logbuf.Buffer           // nil disables the panel log viewer
 	SetupCodeFile string                   // shown by the setup wizard
 	OnSetupDone   func()                   // called after the first administrator is created
 	Catalog       *runtimes.Catalog
@@ -116,6 +121,9 @@ type server struct {
 	settings      *service.SettingsService
 	sites         *service.SiteService
 	ai            *service.AIService
+	env           *service.PanelEnvService
+	host          *hostmon.Monitor
+	logs          *logbuf.Buffer
 	setupCodeFile string
 	onSetupDone   func()
 	statsLimit    *console.Limiter
@@ -156,6 +164,9 @@ func New(d Deps) *fiber.App {
 	app := fiber.New(cfg)
 
 	metrics := newPanelMetrics()
+	if d.Host != nil && d.Host.HTTP == nil {
+		d.Host.HTTP = metrics.stats
+	}
 	app.Use(securityHeaders, metrics.observe, smallBody)
 	app.Get("/metrics", metrics.handler(d))
 
@@ -186,7 +197,7 @@ func New(d Deps) *fiber.App {
 		return c.JSON(fiber.Map{"status": "ok", "checks": checks})
 	})
 	if d.Auth != nil && d.Bots != nil {
-		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, sites: d.Sites, ai: d.AI, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
+		s := &server{log: d.Log, auth: d.Auth, bots: d.Bots, oauth: d.OAuth, sftp: d.SFTP, analytics: d.Analytics, publicURL: d.PublicURL, registry: d.Registry, stats: d.Stats, backups: d.Backups, deploy: d.Deploy, ops: d.Ops, audit: d.Audit, schedules: d.Schedules, mfa: d.MFA, tokens: d.Tokens, health: d.Health, settings: d.Settings, sites: d.Sites, ai: d.AI, env: d.Env, host: d.Host, logs: d.Logs, setupCodeFile: d.SetupCodeFile, onSetupDone: d.OnSetupDone, statsLimit: console.NewLimiter(0, 0, 0), catalog: d.Catalog, secureCookies: d.SecureCookies,
 			console: d.Console, consoleLimit: d.ConsoleLimit, baseCtx: d.BaseCtx, nodes: d.Nodes, files: d.Files, maxUpload: d.MaxUpload,
 			runnerReady: d.RunnerReady, buildMemory: d.BuildMemory, diagnostics: d.Diagnostics}
 		if s.buildMemory == 0 {
@@ -436,10 +447,23 @@ func (s *server) routes(v1 fiber.Router) {
 		authed.Get("/admin/settings", s.requireAdmin, s.getSettings)
 		authed.Put("/admin/settings", s.requireAdmin, s.putSettings)
 	}
+	if s.env != nil {
+		authed.Get("/admin/environment", s.requireAdmin, s.getEnvironment)
+		authed.Put("/admin/environment", s.requireAdmin, s.putEnvironment)
+		authed.Post("/admin/environment/restart", s.requireAdmin, s.restartPanel)
+	}
 	if s.nodes != nil {
 		nodes := authed.Group("/nodes", s.requireAdmin)
 		nodes.Get("", s.listNodes)
 		nodes.Get("/:id/telemetry", s.nodeTelemetry)
+		nodes.Get("/:id/history", s.nodeHistory)
+	}
+	if s.host != nil {
+		authed.Get("/admin/host", s.requireAdmin, s.hostSnapshot)
+		authed.Get("/admin/host/bots", s.requireAdmin, s.hostBots)
+	}
+	if s.logs != nil {
+		authed.Get("/admin/logs", s.requireAdmin, s.panelLogs)
 	}
 
 	authed.Post("/bots", s.createBot)

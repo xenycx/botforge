@@ -29,4 +29,21 @@ type Telemetry struct {
 	DiskUsedBytes    int64
 	DiskTotalBytes   int64
 	RunningBots      int
+
+	// Added in migration 0032. Rates are bytes per second averaged over the
+	// interval since the previous sample.
+	Load1                         float64
+	SwapUsedBytes, SwapTotalBytes int64
+	NetRxBps, NetTxBps            int64
+	DiskReadBps, DiskWriteBps     int64
+}
+
+// TelemetryBucket is one point of a downsampled series: the mean of the samples
+// in the bucket, with the highest CPU and memory readings kept so a short spike
+// is still visible on a week-long chart.
+type TelemetryBucket struct {
+	Telemetry
+	CPUMax    float64
+	MemoryMax int64
+	Samples   int
 }

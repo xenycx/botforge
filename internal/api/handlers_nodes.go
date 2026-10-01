@@ -15,6 +15,7 @@ type NodeStore interface {
 	ListNodes(ctx context.Context) ([]domain.Node, error)
 	GetNode(ctx context.Context, id string) (domain.Node, error)
 	ListTelemetry(ctx context.Context, nodeID string, sinceMS int64, limit int) ([]domain.Telemetry, error)
+	ListTelemetryBuckets(ctx context.Context, nodeID string, sinceMS, bucketMS int64) ([]domain.TelemetryBucket, error)
 }
 
 const (
@@ -39,6 +40,13 @@ type sampleDTO struct {
 	DiskUsedBytes    int64   `json:"disk_used_bytes"`
 	DiskTotalBytes   int64   `json:"disk_total_bytes"`
 	RunningBots      int     `json:"running_bots"`
+	Load1            float64 `json:"load1"`
+	SwapUsedBytes    int64   `json:"swap_used_bytes"`
+	SwapTotalBytes   int64   `json:"swap_total_bytes"`
+	NetRxBps         int64   `json:"net_rx_bps"`
+	NetTxBps         int64   `json:"net_tx_bps"`
+	DiskReadBps      int64   `json:"disk_read_bps"`
+	DiskWriteBps     int64   `json:"disk_write_bps"`
 }
 
 // listNodes returns nodes with their latest sample. Host-level data is
@@ -66,7 +74,8 @@ func (s *server) listNodes(c fiber.Ctx) error {
 
 func toSample(t domain.Telemetry) sampleDTO {
 	return sampleDTO{t.SampledAtMS, t.CPUPercent, t.LogicalCPUs, t.MemoryUsedBytes, t.MemoryTotalBytes,
-		t.DiskUsedBytes, t.DiskTotalBytes, t.RunningBots}
+		t.DiskUsedBytes, t.DiskTotalBytes, t.RunningBots, t.Load1, t.SwapUsedBytes, t.SwapTotalBytes,
+		t.NetRxBps, t.NetTxBps, t.DiskReadBps, t.DiskWriteBps}
 }
 
 // nodeTelemetry returns up to `limit` of the newest samples after `since_ms`,
