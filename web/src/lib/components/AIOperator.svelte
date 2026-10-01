@@ -34,6 +34,14 @@
 	let lastSequence = $state(0);
 	let ws: WebSocket | null = null;
 	let secureValues = $state<Record<string, Record<string, string>>>({});
+	let log = $state<HTMLDivElement | null>(null);
+	let follow = true;
+	// Keep the transcript pinned to the newest output unless the reader has
+	// scrolled up.
+	$effect(() => {
+		void messages.length; void streaming;
+		if (log && follow) queueMicrotask(() => log && (log.scrollTop = log.scrollHeight));
+	});
 	const base = $derived(botId ? `/bots/${botId}` : `/sites/${siteId}`);
 	const active = $derived(!!run && ['queued', 'running', 'waiting_approval'].includes(run.status));
 	const provider = $derived(providers.find((p) => p.id === selected?.provider_id));
@@ -54,7 +62,7 @@
 		catch (e) { error = why(e); } finally { busy = false; }
 	}
 	async function open(c: Conversation) {
-		ws?.close(); ws = null; selected = c; run = null; tools = []; changes = []; citations = []; streaming = ''; lastSequence = 0;
+		ws?.close(); ws = null; follow = true; selected = c; run = null; tools = []; changes = []; citations = []; streaming = ''; lastSequence = 0;
 		try { const d = await api<{ conversation: Conversation; messages: Message[] }>('GET', `/ai/conversations/${c.id}`); selected = d.conversation; messages = d.messages; }
 		catch (e) { error = why(e); return; }
 		const latest = await restore(c.id);
@@ -144,8 +152,8 @@
 		{#if active}<button class="btn btn-sm" onclick={cancel}>Cancel run</button>{/if}
 	</div>
 	{#if error}<Notice tone="fail" class="m-3" live>{error}</Notice>{/if}
-	<div class="grid min-h-[36rem] xl:grid-cols-[15rem_minmax(20rem,1fr)_21rem]">
-		<aside class="border-b border-rule-soft bg-paper-2/35 p-3 xl:border-r xl:border-b-0" aria-label="Incident conversations">
+	<div class="grid min-h-[36rem] xl:h-[min(88dvh,64rem)] xl:grid-cols-[15rem_minmax(20rem,1fr)_21rem]">
+		<aside class="border-b border-rule-soft bg-paper-2/35 p-3 xl:overflow-y-auto xl:border-r xl:border-b-0" aria-label="Incident conversations">
 			<button class="btn btn-primary w-full" onclick={create} disabled={busy || providers.length === 0}><Icon name="plus" />New incident</button>
 			{#if providers.length === 0}<p class="mt-3 rounded-control border border-rule-soft bg-paper p-3 text-small text-muted">An administrator must add an enabled AI provider before new messages can run.</p>{/if}
 			<div class="mt-3 flex gap-2 overflow-x-auto xl:block xl:space-y-1">
@@ -159,7 +167,7 @@
 					<select class="field min-w-40 flex-1 py-1.5" value={selected.provider_id ?? ''} onchange={(e) => selectProvider(e.currentTarget.value)} disabled={active}>{#each providers as p}<option value={p.id}>{p.name}</option>{/each}</select>
 					<input class="field min-w-36 flex-1 py-1.5 font-mono text-small" bind:value={selected.model} onblur={saveModel} disabled={active} aria-label="Model ID" />
 				</div>
-				<div class="flex-1 space-y-4 overflow-y-auto p-4" aria-live="polite">
+				<div class="max-h-[70dvh] min-h-0 flex-1 space-y-4 overflow-y-auto p-4 xl:max-h-none" aria-live="polite" bind:this={log} onscroll={() => { if (log) follow = log.scrollHeight - log.scrollTop - log.clientHeight < 80; }}>
 					{#each messages as m (m.id)}<article class="max-w-[52rem] {m.role === 'user' ? 'ml-auto rounded-tile bg-action px-4 py-3 text-white' : ''}">{#if m.role === 'assistant'}<div class="mb-1 eyebrow text-action">Operator</div>{/if}<SafeMarkdown source={m.content} /></article>{/each}
 					{#if streaming}<article class="max-w-[52rem]"><div class="mb-1 eyebrow text-action">Operator · working</div><SafeMarkdown source={streaming} /><span class="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-action"></span></article>{/if}
 					{#if messages.length === 0}<div class="mx-auto max-w-lg py-16 text-center"><span class="mx-auto grid size-12 place-items-center rounded-pill bg-action/10 text-action"><Icon name="activity" size={20} /></span><h4 class="mt-3 text-title font-semibold">Start with the symptom</h4><p class="mt-1 text-muted">Try “Why did the last deployment fail?” or “Check the startup command and repair the build.” Read-only investigation starts automatically.</p></div>{/if}
@@ -168,7 +176,7 @@
 			{:else}<div class="grid flex-1 place-items-center p-8 text-center text-muted">Create or open an incident conversation.</div>{/if}
 		</main>
 
-		<aside class="border-t border-rule-soft bg-paper-2/25 p-3 xl:border-t-0 xl:border-l" aria-label="Run inspector">
+		<aside class="border-t border-rule-soft bg-paper-2/25 p-3 xl:overflow-y-auto xl:border-t-0 xl:border-l" aria-label="Run inspector">
 			<div class="flex items-center justify-between"><h4 class="font-semibold">Run inspector</h4>{#if run}<span class="pill" data-tone={run.status === 'completed' ? 'run' : run.status === 'failed' ? 'fail' : undefined}>{run.status.replace('_', ' ')}</span>{/if}</div>
 			{#if run}<p class="mt-1 font-mono text-[.72rem] text-muted">{run.input_tokens + run.output_tokens} tokens · {run.mode}</p>{/if}
 			<div class="mt-3 space-y-3">

@@ -96,7 +96,7 @@ IDs, and HTTP paths are deliberately not used as labels.
 AI provider and search credentials are entered in the encrypted
 Administration UI (the first provider key may also be entered in the optional
 AI operator step of `/setup`); never place them in bot environment variables.
-Research connections ignore `HTTP(S)_PROXY` and connect directly, because the
-destination address is checked at connect time. Diagnostic
+Web-search requests honour `HTTP(S)_PROXY`; public page fetches always connect
+directly, because the destination address is checked at connect time. Diagnostic
 containers require the local Docker runner and remain offline. See
 [AI operator](ai-operator.md).

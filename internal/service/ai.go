@@ -1003,6 +1003,9 @@ func (s *AIService) Run(ctx context.Context, actor domain.User, id string) (doma
 }
 
 func toolSchema(name, description string, props map[string]any, required ...string) operator.Tool {
+	if required == nil {
+		required = []string{} // providers reject "required": null
+	}
 	return operator.Tool{Type: "function", Function: operator.ToolFunction{Name: name, Description: description, Parameters: map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}}}
 }
 func aiTools() []operator.Tool {
@@ -1701,9 +1704,12 @@ func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.
 		if len(after) > maxAIFile || !utf8.Valid(after) || bytes.IndexByte(after, 0) >= 0 {
 			return "", false, domain.Invalid("proposed text file is invalid or too large")
 		}
-		if s.redactor(ctx, c).Text(content) != content {
-			return "", false, domain.Invalid("proposed content contains a configured secret value")
-		}
+	}
+	// The redactor is also applied to the stored diff, which people review;
+	// the compressed snapshots keep the exact bytes for Undo.
+	red := s.redactor(ctx, c)
+	if !del && red.Text(content) != content {
+		return "", false, domain.Invalid("proposed content contains a configured secret value")
 	}
 	size := int64(len(after))
 	if del {
@@ -1725,7 +1731,7 @@ func (s *AIService) fileChange(ctx context.Context, actor domain.User, c domain.
 	if del {
 		op = "delete"
 	}
-	change := domain.AIChangeSet{ID: uuid.NewString(), RunID: run.ID, TargetKind: kind, TargetID: target, Status: "draft", Summary: clipService(summary, 2000), CreatedAtMS: s.now(), Files: []domain.AIChangeFile{{Path: p, Operation: op, BeforeGzip: bg, AfterGzip: ag, BeforeRevision: beforeRev, Mode: 0o640, Diff: simpleDiff(p, before, after)}}}
+	change := domain.AIChangeSet{ID: uuid.NewString(), RunID: run.ID, TargetKind: kind, TargetID: target, Status: "draft", Summary: clipService(summary, 2000), CreatedAtMS: s.now(), Files: []domain.AIChangeFile{{Path: p, Operation: op, BeforeGzip: bg, AfterGzip: ag, BeforeRevision: beforeRev, Mode: 0o640, Diff: red.Text(simpleDiff(p, before, after))}}}
 	change.Files[0].ChangeSetID = change.ID
 	if e = s.Store.InsertAIChangeSet(ctx, change); e != nil {
 		return "", false, e

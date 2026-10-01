@@ -122,6 +122,8 @@ func parseProviderError(resp *http.Response) error {
 		code = "authentication"
 	case 402:
 		code = "balance"
+	case 400, 404, 422:
+		code = "invalid_request" // bad model, schema or parameters
 	case 429:
 		code = "rate_limit"
 		if strings.Contains(string(v.Error.Code), "insufficient_quota") {
@@ -305,6 +307,10 @@ func FriendlyError(err error) (code, message string) {
 			return p.Code, "The provider is rate limiting requests. Retry after the shown delay."
 		case "malformed_stream":
 			return p.Code, "The provider returned an invalid streaming response."
+		case "invalid_request":
+			// The provider's own explanation (an unknown model, a rejected
+			// parameter) is what the administrator needs to fix it.
+			return p.Code, "The provider rejected the request: " + clip(p.Message, 400)
 		}
 		return p.Code, "The AI provider could not complete the request."
 	}

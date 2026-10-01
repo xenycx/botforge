@@ -123,7 +123,12 @@ func (s *server) aiPutSearchSettings(c fiber.Ctx) error {
 func (s *server) aiTestSearch(c fiber.Ctx) error {
 	v, e := s.ai.TestSearch(c.Context(), currentUser(c))
 	if e != nil {
-		return e
+		// Our own refusals keep their status; anything else is the search
+		// service or the network, reported as such instead of a bare 500.
+		if code := statusOfError(e); code != 0 && code != fiber.StatusInternalServerError {
+			return e
+		}
+		return fiber.NewError(fiber.StatusBadGateway, "search failed: "+e.Error())
 	}
 	return c.JSON(v)
 }

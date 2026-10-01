@@ -121,16 +121,22 @@ func dialControl(allowPrivate bool) func(network, address string, _ syscall.RawC
 	}
 }
 
-// client builds a direct (never proxied) client whose dialer enforces the
-// address policy at connect time. A proxy would hide the real destination.
-func (r *Research) client(allowPrivate bool, redirect func(*http.Request, []*http.Request) error) *http.Client {
+// client builds a client whose dialer enforces the address policy at connect
+// time. Public page fetches are always direct: a proxy would resolve the name
+// itself and hide the real destination. The administrator-trusted search
+// origin may go through the environment's HTTP(S)_PROXY.
+func (r *Research) client(allowPrivate, useProxy bool, redirect func(*http.Request, []*http.Request) error) *http.Client {
 	if r != nil && r.HTTP != nil {
 		c := *r.HTTP
 		c.CheckRedirect = redirect
 		return &c
 	}
 	d := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Resolver: r.resolver(), Control: dialControl(allowPrivate)}
-	t := &http.Transport{Proxy: nil, DialContext: d.DialContext, ForceAttemptHTTP2: true, MaxIdleConns: 10, IdleConnTimeout: 30 * time.Second,
+	var proxy func(*http.Request) (*url.URL, error)
+	if useProxy {
+		proxy = http.ProxyFromEnvironment
+	}
+	t := &http.Transport{Proxy: proxy, DialContext: d.DialContext, ForceAttemptHTTP2: true, MaxIdleConns: 10, IdleConnTimeout: 30 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second}
 	return &http.Client{Timeout: 20 * time.Second, Transport: t, CheckRedirect: redirect}
 }
@@ -181,7 +187,7 @@ func (r *Research) Search(ctx context.Context, cfg SearchConfig, q string) (Sear
 	}
 	// Keys travel in X-API-Key, which Go would forward on a cross-origin
 	// redirect, so the search client never leaves the configured origin.
-	client := r.client(true, func(req *http.Request, via []*http.Request) error {
+	client := r.client(true, true, func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
 			return errors.New("too many redirects")
 		}
@@ -231,6 +237,11 @@ func (r *Research) Search(ctx context.Context, cfg SearchConfig, q string) (Sear
 			last = errors.New("search service rate limited every configured key")
 			continue
 		}
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			resp.Body.Close()
+			last = fmt.Errorf("search service refused the request (%d); check the search API keys", resp.StatusCode)
+			continue
+		}
 		if resp.StatusCode/100 != 2 {
 			resp.Body.Close()
 			return SearchResponse{}, fmt.Errorf("search service returned %d", resp.StatusCode)
@@ -271,7 +282,7 @@ func (r *Research) Fetch(ctx context.Context, raw string) (title, text string, e
 	if _, err = r.ValidateURL(ctx, raw); err != nil {
 		return
 	}
-	client := r.client(false, func(req *http.Request, via []*http.Request) error {
+	client := r.client(false, false, func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
 		}

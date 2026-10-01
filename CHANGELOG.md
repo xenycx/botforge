@@ -70,6 +70,8 @@ authoritative current version.
 
 ### Changed
 
+- AI web-search requests honour `HTTP(S)_PROXY` (the search origin is
+  administrator-trusted); public page fetches still connect directly.
 - AI run limits (diagnostics, apply attempts, lifecycle actions, changed
   files and bytes, retained tool output) are now enforced per run in both
   Approval and Auto mode; a call over a limit returns a tool error to the
@@ -120,6 +122,17 @@ authoritative current version.
 
 ### Fixed
 
+- Every real AI run failed on its first provider request: tools without
+  parameters were sent with `"required": null`, which DeepSeek (and other
+  strict providers) reject. Found by testing against the live API.
+- A provider's invalid-request reply (unknown model, rejected parameter) is
+  now shown to the user instead of a generic failure.
+- **Test search** reports a failing search service as a 502 with its reason
+  instead of an internal error; a search key refused with 401/403 is skipped
+  in favour of the next configured key.
+- AI chat Markdown renders bold and italics, tables that follow a paragraph
+  line, and level 4–6 headings; the transcript and run inspector scroll
+  inside the workspace instead of growing the page.
 - Saving AI web-research settings failed with "invalid JSON body" because the
   form sent back the read-only `key_count`/`key_set` fields, so search stayed
   disabled. The form now sends only its inputs, shows its own errors, and
@@ -151,6 +164,8 @@ authoritative current version.
 
 ### Security
 
+- Change-set diffs shown for AI file changes redact configured secret values;
+  Undo still restores the exact original bytes.
 - AI web research validates the address of every connection at dial time,
   covering DNS rebinding and redirects, and now also blocks carrier-grade NAT
   (`100.64.0.0/10`), reserved, NAT64 and 6to4 ranges. Research connections no

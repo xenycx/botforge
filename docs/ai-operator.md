@@ -82,8 +82,10 @@ connection (each redirect included) is checked by the dialer after DNS
 resolution, which also defeats DNS rebinding: loopback, private, link-local,
 carrier-grade NAT (`100.64.0.0/10`), multicast, reserved, NAT64/6to4 and
 cloud-metadata addresses are refused, as are credential-bearing and non-HTTP
-URLs. Research connections are made directly and never through an HTTP proxy
-environment variable. Fetched pages are stripped of scripts, navigation and
+URLs. Page fetches are made directly and never through an HTTP proxy, because
+a proxy would resolve the name itself; search requests to the configured
+origin honour `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`. A search key the service
+refuses (401/403) is skipped in favour of the next configured key. Fetched pages are stripped of scripts, navigation and
 forms.
 
 ## Data and permission boundary
@@ -110,7 +112,8 @@ tools do not exist.
 ## Changes, diagnostics and recovery
 
 AI text changes are limited to 1 MiB per file and stored as compressed
-before/after snapshots with a bounded unified diff. Application checks the
+before/after snapshots with a bounded unified diff. The reviewable diff has
+configured secret values redacted; Undo restores the exact snapshot. Application checks the
 original revision, stages the complete set, and uses the existing crash journal
 for recoverable renames. A concurrent editor, SFTP write or deployment causes a
 conflict instead of being overwritten. Undo likewise requires the retained

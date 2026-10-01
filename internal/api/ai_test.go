@@ -166,6 +166,15 @@ func TestAIOperatorApprovalApplyAndUndo(t *testing.T) {
 	json.Unmarshal(admin.mustStatus(202, "POST", "/api/v1/ai/conversations/"+conv+"/messages", map[string]any{"content": "Why does login fail?", "mode": "approval"}), &run)
 	waitRun(t, admin, run.ID, "waiting_approval")
 
+	// Every tool schema must be valid JSON Schema: real providers reject
+	// "required": null on tools without parameters.
+	tools, _ := fp.body(0)["tools"].([]any)
+	for _, tl := range tools {
+		params := tl.(map[string]any)["function"].(map[string]any)["parameters"].(map[string]any)
+		if _, ok := params["required"].([]any); !ok {
+			t.Fatalf("tool %v has a non-array required: %#v", tl.(map[string]any)["function"].(map[string]any)["name"], params["required"])
+		}
+	}
 	// Secrets never reach the provider: file contents are redacted and
 	// protected paths are refused.
 	raw, _ := json.Marshal(fp.body(2))
@@ -196,6 +205,10 @@ func TestAIOperatorApprovalApplyAndUndo(t *testing.T) {
 	}
 	if call == "" || len(runs[0].ToolCalls) != 3 || len(runs[0].ChangeSets) != 1 || runs[0].ChangeSets[0].Status != "draft" {
 		t.Fatalf("no pending approval or draft in %+v", runs[0])
+	}
+	// The reviewable diff is redacted too; Undo uses the exact snapshot.
+	if raw := string(admin.mustStatus(200, "GET", "/api/v1/ai/conversations/"+conv+"/runs", nil)); strings.Contains(raw, "tok-very-secret-value") || !strings.Contains(raw, "login('[REDACTED]')") {
+		t.Fatalf("change-set diff exposes the secret: %s", raw)
 	}
 	admin.mustStatus(204, "POST", "/api/v1/ai/tool-calls/"+call+"/decision", map[string]any{"approve": true})
 	r := waitRun(t, admin, run.ID, "completed", "failed")
