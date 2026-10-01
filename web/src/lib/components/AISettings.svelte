@@ -29,6 +29,15 @@
 	let models = $state<string[]>([]);
 	let busy = $state('');
 	let searchResult = $state('');
+	let searchError = $state('');
+	let savedSearch = $state('');
+
+	// Only the input fields: the view also carries read-only markers
+	// (key_count, key_set) that the strict API decoder rejects.
+	const searchBody = (v: S) => ({ search_enabled: v.search_enabled, fetch_enabled: v.fetch_enabled, base_url: v.base_url.trim(), results: Number(v.results), language: v.language.trim(), categories: v.categories.trim(), time_range: v.time_range, safe_search: Number(v.safe_search) });
+	// Test search uses the saved settings, so it waits for unsaved edits.
+	const searchDirty = $derived(!!search && (JSON.stringify(searchBody(search)) !== savedSearch || !!searchKeys.trim()));
+	function setSearch(v: S) { search = v; savedSearch = JSON.stringify(searchBody(v)); }
 
 	const msg = (e: unknown) => (e instanceof ApiError ? e.message : 'The AI settings request failed.');
 	const micros = (usd: number | null) => (usd === null || (usd as unknown) === '' || Number.isNaN(Number(usd)) ? null : Math.round(Number(usd) * 1_000_000));
@@ -45,7 +54,7 @@
 	async function load() {
 		try {
 			providers = (await api<{ providers: P[] }>('GET', '/admin/ai/providers')).providers;
-			search = await api<S>('GET', '/admin/ai/search');
+			setSearch(await api<S>('GET', '/admin/ai/search'));
 		} catch (e) { error = msg(e); }
 	}
 	function startNew() { editing = ''; form = { ...preset(), default: providers.length === 0 }; key = ''; models = []; error = ''; }
@@ -97,21 +106,21 @@
 	async function saveSearch(e: SubmitEvent) {
 		e.preventDefault();
 		if (!search) return;
-		busy = 'search'; error = '';
+		busy = 'search'; searchError = ''; searchResult = '';
 		try {
 			const keys = searchKeys.trim() ? searchKeys.split('\n').map((x) => x.trim()).filter(Boolean) : undefined;
-			search = await api<S>('PUT', '/admin/ai/search', { ...search, results: Number(search.results), safe_search: Number(search.safe_search), keys });
+			setSearch(await api<S>('PUT', '/admin/ai/search', { ...searchBody(search), keys }));
 			searchKeys = '';
 			toast('Research settings saved', 'success');
-		} catch (x) { error = msg(x); } finally { busy = ''; }
+		} catch (x) { searchError = msg(x); } finally { busy = ''; }
 	}
 	async function testSearch() {
-		busy = 'search-test'; error = ''; searchResult = '';
+		busy = 'search-test'; searchError = ''; searchResult = '';
 		try {
 			const r = await api<{ Answer?: string; Results?: { Title: string; URL: string }[] }>('POST', '/admin/ai/search/test');
 			const n = r.Results?.length ?? 0;
 			searchResult = n ? `${n} public result${n === 1 ? '' : 's'}, e.g. ${r.Results![0].Title || r.Results![0].URL}` : 'The search service answered with no public results.';
-		} catch (e) { error = msg(e); } finally { busy = ''; }
+		} catch (e) { searchError = msg(e); } finally { busy = ''; }
 	}
 	onMount(load);
 </script>
@@ -196,9 +205,11 @@
 			<label><span class="label">Time range</span><select class="field" bind:value={search.time_range}><option value="">Any</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option><option value="year">Year</option></select></label>
 			<label class="sm:col-span-2"><span class="label">Categories</span><input class="field" bind:value={search.categories} placeholder="general, it" /></label>
 			<label class="sm:col-span-2"><span class="label">Replace API keys (one per line)</span><textarea class="field min-h-20 font-mono" bind:value={searchKeys} placeholder={search.key_count ? `${search.key_count} encrypted key(s) already set` : 'Optional'}></textarea></label>
+			{#if searchError}<p class="text-small text-fail sm:col-span-2" role="alert">{searchError}</p>{/if}
 			{#if searchResult}<p class="text-small text-muted sm:col-span-2" role="status">{searchResult}</p>{/if}
+			{#if searchDirty}<p class="text-small text-muted sm:col-span-2">Unsaved changes. Save them before testing; the test uses the saved settings.</p>{/if}
 			<div class="flex justify-end gap-2 sm:col-span-2">
-				<button type="button" class="btn" disabled={!!busy || !search.search_enabled} onclick={testSearch} title="Saved settings are tested">{busy === 'search-test' ? 'Testing…' : 'Test search'}</button>
+				<button type="button" class="btn" disabled={!!busy || searchDirty || !search.search_enabled} onclick={testSearch} title="Tests the saved settings">{busy === 'search-test' ? 'Testing…' : 'Test search'}</button>
 				<button class="btn btn-primary" disabled={busy === 'search'}>Save research settings</button>
 			</div>
 		</form>

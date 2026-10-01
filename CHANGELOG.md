@@ -120,6 +120,10 @@ authoritative current version.
 
 ### Fixed
 
+- Saving AI web-research settings failed with "invalid JSON body" because the
+  form sent back the read-only `key_count`/`key_set` fields, so search stayed
+  disabled. The form now sends only its inputs, shows its own errors, and
+  **Test search** waits until changes are saved (it tests saved settings).
 - AI runs no longer fail with a storage error when a provider reuses a tool
   call id (such as `call_0`) across runs.
 - An approval decided right after its card appeared could be lost, leaving

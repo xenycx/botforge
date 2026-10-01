@@ -359,6 +359,26 @@ for (const [label, vp] of [['phone', { width: 375, height: 812 }], ['tablet', { 
 	await p.context().close();
 }
 
+await step('AI research settings save (enable, key) and survive a reload', async () => {
+	const p = await newPage();
+	await signIn(p, 'admin@e2e.test', adminPw);
+	await p.goto('/admin/settings');
+	const research = p.locator('section', { has: p.getByRole('heading', { name: 'Web research' }) });
+	await research.waitFor();
+	await research.getByLabel('Enable search').check();
+	await research.getByLabel('Replace API keys (one per line)').fill('e2e-search-key');
+	expect(await research.getByRole('button', { name: 'Test search' }).isDisabled(), 'Test search runs against unsaved settings');
+	await research.getByRole('button', { name: 'Save research settings' }).click();
+	await p.getByText('Research settings saved').waitFor();
+	expect((await research.getByRole('alert').count()) === 0, 'save showed an error');
+	await p.reload();
+	await research.waitFor();
+	expect(await research.getByLabel('Enable search').isChecked(), 'search is not enabled after a reload');
+	expect((await research.getByLabel('Replace API keys (one per line)').getAttribute('placeholder'))?.startsWith('1 encrypted key'), 'the key was not stored');
+	expect(!(await research.getByRole('button', { name: 'Test search' }).isDisabled()), 'Test search stays disabled after saving');
+	await p.context().close();
+});
+
 await step('no unexpected browser console errors', async () => {
 	expect(consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 });
